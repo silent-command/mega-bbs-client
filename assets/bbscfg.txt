@@ -1,3 +1,4 @@
+Retrocampus|bbs.retrocampus.com|6510|0|0
 Particles BBS|particlesbbs.dyndns.org|6400|0|0
 Borderline BBS|bbs.borderline.org|23|0|1
 Heatwave BBS|heatwave.ddns.net|9640|0|0

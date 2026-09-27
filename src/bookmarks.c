@@ -30,6 +30,7 @@ static unsigned char bm_count = 0;
  * (name|host|port|emul|res; emul 0 PETSCII 1 ANSI; res 0 40x25, 1 80x25,
  * 2 80x50) so one parser serves both. */
 static const char defaults_txt[] =
+  "Retrocampus|bbs.retrocampus.com|6510|0|0\n"
   "Particles BBS|particlesbbs.dyndns.org|6400|0|0\n"
   "Borderline BBS|bbs.borderline.org|23|0|1\n"
   "Heatwave BBS|heatwave.ddns.net|9640|0|0\n"
