@@ -196,12 +196,15 @@ unsigned char xmodem_receive(const char *filename, unsigned char drive)
 
   drain_rx();
 
-  /* 'C' every three seconds, four times, then NAK for a checksum-only
-   * sender. Whatever else arrives is the board still talking. */
-  for (tries = 0; tries < 10 && !have; tries++) {
-    if (tries == 4) { use_crc = 0; poll_char = NAK; }
+  /* 'C' and NAK by turns every two seconds: a CRC sender starts on the
+   * first 'C', a checksum-only one (most PETSCII boards) on the first
+   * NAK, and neither waits long. Whatever else arrives is the board
+   * still talking. */
+  for (tries = 0; tries < 12 && !have; tries++) {
+    use_crc = (unsigned char)(!(tries & 1));
+    poll_char = use_crc ? POLL_C : NAK;
     tx_byte(poll_char);
-    while (rx_byte(&b, TIMEOUT_FRAMES)) {
+    while (rx_byte(&b, 120)) {
       if (b == SOH || b == STX || b == EOT || b == CAN) { have = 1; break; }
     }
     if (user_abort || !net_alive()) break;

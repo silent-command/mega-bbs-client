@@ -48,5 +48,7 @@ void telnet_idle(void);
 unsigned char telnet_rx_byte(unsigned char *out);
 unsigned char telnet_tx_data(const unsigned char *p, unsigned int n);
 unsigned char telnet_binary(void);
+/* 1 once the peer has sent a telnet command; until then the link is raw. */
+unsigned char telnet_is_telnet(void);
 
 #endif

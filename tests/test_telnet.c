@@ -69,6 +69,31 @@ int main(void)
     assert(last_out_char == 'S');
   }
 
+  /* A raw board: no command has come, so our options are held, 0xFF
+   * followed by data is two characters, and a transfer sees bytes as
+   * they are. A real command makes it telnet and releases the options. */
+  {
+    unsigned char b, got[8], n = 0;
+    tx_all_len = 0;
+    telnet_send_init_negotiation();
+    telnet_send_naws(40, 25);
+    assert(tx_all_len == 0 && last_tx_len == 0);             /* nothing sent yet */
+    out_char_count = 0;
+    telnet_feed((const unsigned char *)"\xff\x41", 2);
+    assert(out_char_count == 2 && out_buf[0] == 0xff && out_buf[1] == 0x41);
+    assert(!telnet_is_telnet());
+    queue((const unsigned char *)"\xff\xff\xfb\x01", 4);
+    while (telnet_rx_byte(&b)) got[n++] = b;
+    assert(n == 4 && got[0] == 0xff && got[1] == 0xff && got[2] == 0xfb);   /* raw: all four are data */
+    tx_all_len = 0;
+    assert(telnet_tx_data((const unsigned char *)"\xff", 1) && tx_all_len == 1);   /* and nothing is doubled */
+    telnet_feed((const unsigned char *)"\xff\xfd\x03", 3);              /* IAC DO SGA: a telnet server after all */
+    assert(telnet_is_telnet());
+    assert(last_tx_len == 3 && last_tx_buf[1] == TELNET_WILL);          /* the answer to DO SGA, after the held options and NAWS */
+    telnet_reset();
+    telnet_feed((const unsigned char *)"\xff\xfd\x03", 3);
+  }
+
   /* Test IAC DO BINARY negotiation */
   {
     const unsigned char do_bin[] = { TELNET_IAC, TELNET_DO, TELOPT_BINARY };
@@ -190,9 +215,11 @@ int main(void)
     telnet_reset();
   }
 
-  /* During a transfer, IAC IAC is one 0xFF, a NOP vanishes, an option
-   * request is answered, and a ZRQINIT-shaped run of data is not detected. */
+  /* During a transfer on a telnet link, IAC IAC is one 0xFF, a NOP
+   * vanishes, an option request is answered, and a ZRQINIT-shaped run of
+   * data is not detected. */
   {
+    telnet_feed((const unsigned char *)"\xff\xfd\x03", 3);      /* the peer is a telnet server */
     static const unsigned char stream[] = {
       0x41, 0xff, 0xff, 0x42, 0xff, TELNET_NOP, 0x43,
       0xff, TELNET_WILL, TELOPT_ECHO, 0x44,
@@ -213,6 +240,7 @@ int main(void)
   /* An IAC split across two reads keeps its state */
   {
     unsigned char b;
+    telnet_feed((const unsigned char *)"\xff\xfd\x03", 3);
     queue((const unsigned char *)"\xff", 1);
     assert(!telnet_rx_byte(&b));
     queue((const unsigned char *)"\xff" "Z", 2);

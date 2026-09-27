@@ -24,6 +24,16 @@ static unsigned char zmodem_detected = 0;
 static unsigned char in_transfer = 0;       /* detection off while a transfer reads the stream */
 static unsigned char bin_rx = 0, bin_tx = 0; /* the peer's BINARY answers */
 
+/* Whether the peer speaks telnet at all. Many PETSCII boards are plain
+ * sockets: they never negotiate, and to them 0xFF is a character and our
+ * option requests are keystrokes. So a connection is raw until the peer
+ * sends a real command (IAC followed by a command byte), and only then
+ * is IAC escaped on the way out and undone on the way in, and only then
+ * are our own options offered. */
+static unsigned char peer_telnet = 0;
+static unsigned char want_negotiate = 0;
+static unsigned char naws_cols = 0, naws_rows = 0;   /* a NAWS to send once the peer is known to be telnet */
+
 /* Bytes the terminal had read past a detected ZRQINIT: the header itself
  * and the rest of that receive, up to 5 + 128. The transfer reads them
  * first. Lives at $1D80, clear of the F011 sector buffer ($1B00-$1CFF)
@@ -160,11 +170,19 @@ void telnet_reset(void)
   pb_len = 0;
   pb_pos = 0;
   held_n = 0;
+  peer_telnet = 0;
+  want_negotiate = 0;
+  naws_cols = 0;
 }
 
 unsigned char telnet_binary(void)
 {
   return (unsigned char)(bin_rx && bin_tx);
+}
+
+unsigned char telnet_is_telnet(void)
+{
+  return peer_telnet;
 }
 
 static unsigned char win_cols = 80;
@@ -191,9 +209,10 @@ static void send_reply(unsigned char cmd, unsigned char opt)
   if (client_send) client_send(buf, 3);
 }
 
-/* BINARY both ways is asked for up front so a server does not translate
- * CR or NUL in transfer data; IAC stays doubled either way. */
-void telnet_send_init_negotiation(void)
+/* BINARY both ways is asked for so a server does not translate CR or
+ * NUL in transfer data; IAC stays doubled either way. Sent when the peer
+ * has shown it is a telnet server, else held. */
+static void send_options(void)
 {
   unsigned char buf[18];
   buf[0] = TELNET_IAC; buf[1] = TELNET_WILL; buf[2] = TELOPT_SGA;
@@ -205,7 +224,13 @@ void telnet_send_init_negotiation(void)
   if (client_send) client_send(buf, 18);
 }
 
-void telnet_send_naws(unsigned char cols, unsigned char rows)
+void telnet_send_init_negotiation(void)
+{
+  if (peer_telnet) send_options();
+  else want_negotiate = 1;
+}
+
+static void send_naws_now(unsigned char cols, unsigned char rows)
 {
   unsigned char buf[9];
   buf[0] = TELNET_IAC;
@@ -218,6 +243,22 @@ void telnet_send_naws(unsigned char cols, unsigned char rows)
   buf[7] = TELNET_IAC;
   buf[8] = TELNET_SE;
   if (client_send) client_send(buf, 9);
+}
+
+void telnet_send_naws(unsigned char cols, unsigned char rows)
+{
+  if (peer_telnet) send_naws_now(cols, rows);
+  else { naws_cols = cols; naws_rows = rows; }
+}
+
+/* The peer's first command: it is a telnet server, so what was held
+ * back can go. */
+static void peer_is_telnet(void)
+{
+  if (peer_telnet) return;
+  peer_telnet = 1;
+  if (want_negotiate) { want_negotiate = 0; send_options(); }
+  if (naws_cols) { send_naws_now(naws_cols, naws_rows); naws_cols = 0; }
 }
 
 static void handle_subnegotiation(void)
@@ -249,8 +290,8 @@ void telnet_feed(const unsigned char *data, unsigned int len)
 
     switch (tstate) {
     case TSTATE_DATA:
-      if (c == TELNET_IAC) {
-        tstate = TSTATE_IAC;
+      if (c == TELNET_IAC && (peer_telnet || !in_transfer)) {
+        tstate = TSTATE_IAC;                      /* in a raw transfer 0xFF is data, no lookahead */
       } else if (in_transfer) {
         cap_byte = c;
         cap_have = 1;
@@ -272,20 +313,31 @@ void telnet_feed(const unsigned char *data, unsigned int len)
         if (in_transfer) { cap_byte = c; cap_have = 1; }
         else if (client_out) client_out(c);
         tstate = TSTATE_DATA;
+      } else if (c < TELNET_SE) {
+        /* Not a command: a raw board's 0xFF followed by data. Both are data. */
+        tstate = TSTATE_DATA;
+        if (in_transfer) { cap_byte = 0xff; cap_have = 1; telnet_feed(&c, 1); }
+        else { if (client_out) client_out(0xff); telnet_feed(&c, 1); }
       } else if (c == TELNET_DO) {
+        peer_is_telnet();
         tstate = TSTATE_DO;
       } else if (c == TELNET_DONT) {
+        peer_is_telnet();
         tstate = TSTATE_DONT;
       } else if (c == TELNET_WILL) {
+        peer_is_telnet();
         tstate = TSTATE_WILL;
       } else if (c == TELNET_WONT) {
+        peer_is_telnet();
         tstate = TSTATE_WONT;
       } else if (c == TELNET_SB) {
+        peer_is_telnet();
         tstate = TSTATE_SB;
         sb_opt = 0;
         sb_len = 0;
       } else {
         /* Single-byte commands: GA, NOP, SE, etc. swallowed cleanly */
+        peer_is_telnet();
         tstate = TSTATE_DATA;
       }
       break;
@@ -383,6 +435,7 @@ unsigned char telnet_rx_byte(unsigned char *out)
 unsigned char telnet_tx_data(const unsigned char *p, unsigned int n)
 {
   const unsigned char *s = p;
+  if (!peer_telnet) return net_send_all(p, n);        /* a raw board: nothing to escape */
   while (n--) {
     if (*p == TELNET_IAC) {
       if (!net_send_all(s, (unsigned int)(p - s + 1))) return 0;

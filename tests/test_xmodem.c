@@ -297,7 +297,7 @@ int main(void)
   ret = xmodem_receive("TEST.BIN", 0);
   assert(ret == XMODEM_OK);
   assert(out_len == 20480 && memcmp(out_file, file_data, 20480) == 0);
-  assert(peer.c_seen == 1);                     /* the first 'C' was answered */
+  assert(peer.c_seen == 1 && peer.nak_seen == 2);   /* the first 'C' was answered; the NAKs were for the corrupt block and the stray EOT */
   assert(count_bytes(NAK) == 3);                /* corrupt block, stray EOT, first real EOT */
   assert(count_bytes(ACK) == 161);
   assert(xmodem_get_status()->blocks == 160 && xmodem_get_status()->percent == 100);
@@ -313,7 +313,7 @@ int main(void)
   peer.checksum = 1;
   ret = xmodem_receive("TEST.BIN", 0);
   assert(ret == XMODEM_OK && out_len == 20480 && memcmp(out_file, file_data, 20480) == 0);
-  assert(peer.c_seen == 4 && peer.nak_seen >= 1);
+  assert(peer.c_seen == 1 && peer.nak_seen >= 1);   /* one 'C' ignored, then the NAK started it */
 
   /* Block numbers wrap past 255; block 0's complement is 0xFF on the wire */
   start(1, LONG_LEN, 128);
@@ -339,7 +339,7 @@ int main(void)
   peer.silent = 1;
   ret = xmodem_receive("TEST.BIN", 0);
   assert(ret == XMODEM_ERR_TIMEOUT);
-  assert(count_bytes('C') == 4 && count_bytes(NAK) == 6);
+  assert(count_bytes('C') == 6 && count_bytes(NAK) == 6);
   assert(count_bytes(CAN) >= 2);
 
   /* Upload: the receiver's prompt and a repeated 'C' are ignored, block
