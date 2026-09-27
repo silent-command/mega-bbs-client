@@ -1,0 +1,3 @@
+Hello from the MEGA65 Test BBS!
+This file was downloaded via native ZModem over TCP/IP.
+MEGA65 BBS Client v1.0 file transfer test successful!

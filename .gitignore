@@ -1,0 +1,14 @@
+build/
+bin/
+*.o
+*.a
+*.elf
+*.map
+.DS_Store
+__pycache__/
+llvm-mos/
+mega65-tools-development/
+Manuals/
+mega-net/
+test_uploads/
+bbscfg.txt
