@@ -249,8 +249,9 @@ int main(void)
     telnet_reset();
   }
 
-  /* Outbound data doubles 0xFF and nothing else */
+  /* Outbound data doubles 0xFF and nothing else, once the peer is telnet */
   {
+    telnet_feed((const unsigned char *)"\xff\xfd\x03", 3);
     static const unsigned char data[] = { 0x01, 0xff, 0x02, 0xff, 0xff, 0x03 };
     static const unsigned char want[] = { 0x01, 0xff, 0xff, 0x02, 0xff, 0xff, 0xff, 0xff, 0x03 };
     tx_all_len = 0;
