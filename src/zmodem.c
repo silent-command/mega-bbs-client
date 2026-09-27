@@ -476,6 +476,7 @@ __attribute__((noinline)) unsigned char zmodem_receive(unsigned char drive)
       if (!file_open) {
         unsigned char err;
         parse_zfile(n);
+        update_progress();                     /* the box names the file before any question */
         err = cbmdos_create(cur_status.filename, drive);
         if (err == CBMDOS_ERR_EXISTS && ui_confirm_overwrite(cur_status.filename)) {
           cbmdos_delete(cur_status.filename, drive);
