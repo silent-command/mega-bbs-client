@@ -46,6 +46,13 @@ static void lpoke(unsigned long addr, unsigned char val)
     mock_screen_mem[addr - SCREEN] = val;
 }
 
+static unsigned char lpeek(unsigned long addr)
+{
+  if (addr >= COLOUR_RAM && addr < COLOUR_RAM + 65536) return mock_colour_mem[addr - COLOUR_RAM];
+  if (addr >= SCREEN && addr < SCREEN + 65536) return mock_screen_mem[addr - SCREEN];
+  return 0;
+}
+
 #endif
 
 static unsigned char cur_res = RES_80X25;
@@ -121,7 +128,9 @@ void m65_screen_set_res(unsigned char res)
   POKE(0xd02f, 0x47);
   POKE(0xd02f, 0x53);
 
-  /* Configure VIC-IV for resolution */
+  /* Configure VIC-IV for resolution; the VIC-III attribute bits (blink,
+   * reverse, underline in the colour byte's high nibble) stay on. */
+  POKE(0xd031, (unsigned char)(PEEK(0xd031) | 0x20));
   if (cur_cols == 80) {
     POKE(0xd031, (unsigned char)(PEEK(0xd031) | 0x80)); /* H640 on */
     POKE(0xd04c, 0x50);                                 /* H640 horizontal position: 80 ($50) */
@@ -218,46 +227,166 @@ unsigned char m65_screen_bg(void) { return cur_bg; }
 unsigned char m65_screen_orig_border(void) { return orig_border; }
 unsigned char m65_screen_orig_bg(void) { return orig_bg; }
 
+/* ---- the cursor ------------------------------------------------------- */
+
+static unsigned char cur_x, cur_y, cur_on, cur_shown, cur_last;
+
+static __attribute__((noinline)) void cursor_flip(void)
+{
+  unsigned int off = (unsigned int)cur_y * cur_cols + cur_x;
+  lpoke(COLOUR_RAM + off, (unsigned char)(lpeek(COLOUR_RAM + off) ^ 0x20));
+}
+
+static __attribute__((noinline)) void cursor_hide(void)
+{
+  if (cur_shown) { cursor_flip(); cur_shown = 0; }
+}
+
+void m65_screen_set_cursor(unsigned char x, unsigned char y)
+{
+  if (cur_shown && (x != cur_x || y != cur_y)) cursor_hide();
+  cur_x = x;
+  cur_y = y;
+}
+
+void m65_screen_cursor_enable(unsigned char enable)
+{
+  if (!enable) cursor_hide();
+  cur_on = enable;
+}
+
+void m65_screen_cursor_tick(void)
+{
+  unsigned char f = PEEK(0xd7fa);
+  if (!cur_on || (unsigned char)(f - cur_last) < 16) return;
+  cur_last = f;
+  m65_screen_flush();
+  if (cur_x < cur_cols && cur_y < cur_rows) { cursor_flip(); cur_shown ^= 1; }
+}
+
+/* ---- the run buffer --------------------------------------------------- */
+
+#ifdef __MEGA65__
+#define run_ch ((unsigned char *)0x1e80)
+#define run_col ((unsigned char *)0x1ed0)
+#else
+static unsigned char run_ch[80], run_col[80];
+#endif
+static unsigned char run_n, run_x, run_y;
+
+void m65_screen_flush(void)
+{
+  unsigned int off;
+  if (!run_n) return;
+  off = (unsigned int)run_y * cur_cols + run_x;
+  cursor_hide();
+#ifdef __MEGA65__
+  lcopy((unsigned long)(unsigned int)run_ch, SCREEN + off, run_n);
+  lcopy((unsigned long)(unsigned int)run_col, COLOUR_RAM + off, run_n);
+#else
+  {
+    unsigned char i;
+    for (i = 0; i < run_n; i++) { lpoke(SCREEN + off + i, run_ch[i]); lpoke(COLOUR_RAM + off + i, run_col[i]); }
+  }
+#endif
+  run_n = 0;
+}
+
+void m65_screen_putc_buf(unsigned char x, unsigned char y, unsigned char ch, unsigned char col)
+{
+  if (x >= cur_cols || y >= cur_rows) return;
+  if (run_n && (y != run_y || x != (unsigned char)(run_x + run_n) || run_n >= 80)) m65_screen_flush();
+  if (!run_n) { run_x = x; run_y = y; }
+  run_ch[run_n] = ch;
+  run_col[run_n] = col;
+  run_n++;
+}
+
+/* ---- drawing ---------------------------------------------------------- */
+
 void m65_screen_cls(void)
 {
   unsigned int total = (unsigned int)cur_cols * cur_rows;
   if (total == 0) return;
+  run_n = 0;
+  cur_shown = 0;
   lfill(SCREEN, 0x20, total);
   lfill(COLOUR_RAM, cur_text, total);
 }
 
 void m65_screen_clear_row(unsigned char row, unsigned char fill_char, unsigned char col)
 {
-  unsigned long off;
+  unsigned int off;
   if (row >= cur_rows || cur_cols == 0) return;
-  off = (unsigned long)row * cur_cols;
+  m65_screen_flush();
+  if (cur_shown && cur_y == row) cur_shown = 0;
+  off = (unsigned int)row * cur_cols;
   lfill(SCREEN + off, fill_char, cur_cols);
   lfill(COLOUR_RAM + off, col, cur_cols);
 }
 
 void m65_screen_scroll_up(unsigned char top_row, unsigned char bot_row)
 {
-  unsigned int len;
-  unsigned long src, dst;
+  unsigned int len, top;
   if (bot_row <= top_row || bot_row >= cur_rows) return;
+  m65_screen_flush();
+  cursor_hide();
   len = (unsigned int)(bot_row - top_row) * cur_cols;
-  if (len == 0) return;
-  dst = SCREEN + (unsigned long)top_row * cur_cols;
-  src = SCREEN + (unsigned long)(top_row + 1) * cur_cols;
-  lcopy(src, dst, len);
-
-  dst = COLOUR_RAM + (unsigned long)top_row * cur_cols;
-  src = COLOUR_RAM + (unsigned long)(top_row + 1) * cur_cols;
-  lcopy(src, dst, len);
-
+  top = (unsigned int)top_row * cur_cols;
+  lcopy(SCREEN + top + cur_cols, SCREEN + top, len);
+  lcopy(COLOUR_RAM + top + cur_cols, COLOUR_RAM + top, len);
   m65_screen_clear_row(bot_row, 0x20, cur_text);
+}
+
+/* Rows move down one; DMA copies ascending, so an overlapping block
+ * cannot be moved down in one go and the rows go one at a time from the
+ * bottom. */
+void m65_screen_scroll_down(unsigned char top_row, unsigned char bot_row)
+{
+  unsigned char n;
+  unsigned int dst;
+  if (bot_row <= top_row || bot_row >= cur_rows) return;
+  m65_screen_flush();
+  cursor_hide();
+  dst = (unsigned int)bot_row * cur_cols;
+  for (n = (unsigned char)(bot_row - top_row); n; n--) {   /* an 8-bit count: a 16-bit one miscompiles here (orphan_rmw.py) */
+    unsigned int src = dst - cur_cols;
+    lcopy(SCREEN + src, SCREEN + dst, cur_cols);
+    lcopy(COLOUR_RAM + src, COLOUR_RAM + dst, cur_cols);
+    dst = src;
+  }
+  m65_screen_clear_row(top_row, 0x20, cur_text);
+}
+
+void m65_screen_insert(unsigned char x, unsigned char y)
+{
+  unsigned int off;
+  unsigned char n;
+  if (x >= cur_cols - 1 || y >= cur_rows) return;
+  m65_screen_flush();
+  cursor_hide();
+  off = (unsigned int)y * cur_cols + x;
+  n = (unsigned char)(cur_cols - 1 - x);
+#ifdef __MEGA65__
+  lcopy(SCREEN + off, (unsigned long)(unsigned int)run_ch, n);          /* through the run buffer: the DMA copies ascending */
+  lcopy((unsigned long)(unsigned int)run_ch, SCREEN + off + 1, n);
+  lcopy(COLOUR_RAM + off, (unsigned long)(unsigned int)run_ch, n);
+  lcopy((unsigned long)(unsigned int)run_ch, COLOUR_RAM + off + 1, n);
+#else
+  memmove(mock_screen_mem + off + 1, mock_screen_mem + off, n);
+  memmove(mock_colour_mem + off + 1, mock_colour_mem + off, n);
+#endif
+  lpoke(SCREEN + off, 0x20);
+  lpoke(COLOUR_RAM + off, cur_text);
 }
 
 void m65_screen_putc(unsigned char x, unsigned char y, unsigned char ch, unsigned char col)
 {
-  unsigned long off;
+  unsigned int off;
   if (x >= cur_cols || y >= cur_rows) return;
-  off = (unsigned long)y * cur_cols + x;
+  m65_screen_flush();
+  if (cur_shown && x == cur_x && y == cur_y) cur_shown = 0;
+  off = (unsigned int)y * cur_cols + x;
   lpoke(SCREEN + off, ch);
   lpoke(COLOUR_RAM + off, col);
 }
@@ -282,16 +411,6 @@ void m65_screen_puts(unsigned char x, unsigned char y, const char *s, unsigned c
   while (*s && x < cur_cols) {
     m65_screen_putc(x++, y, ascii_to_screencode((unsigned char)*s++), col);
   }
-}
-
-void m65_screen_cursor_enable(unsigned char enable)
-{
-  (void)enable;
-}
-
-void m65_screen_set_cursor(unsigned char x, unsigned char y)
-{
-  (void)x; (void)y;
 }
 
 void m65_screen_init(void)

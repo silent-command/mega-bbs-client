@@ -73,10 +73,7 @@ static unsigned char is_prg_file(const char *name)
 
 static void update_progress(void)
 {
-  if (cur_status.file_size > 0) {
-    cur_status.percent = (unsigned char)((cur_status.bytes_transferred * 100) / cur_status.file_size);
-    if (cur_status.percent > 100) cur_status.percent = 100;
-  }
+  if (cur_status.file_size) cur_status.percent = transfer_percent(cur_status.bytes_transferred, cur_status.file_size);
   if (progress_cb) progress_cb(&cur_status);
 }
 

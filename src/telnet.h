@@ -39,6 +39,8 @@ void telnet_set_terminal_type(const char *name);
  * read after it wait for the transfer. */
 unsigned char telnet_check_zmodem(void);
 void telnet_clear_zmodem(void);
+/* The stream has paused: bytes held back as a possible header go to the screen. */
+void telnet_idle(void);
 
 /* The stream as a transfer sees it: telnet escaping undone on the way in,
  * applied on the way out. telnet_binary says whether both sides agreed to

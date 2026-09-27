@@ -25,6 +25,8 @@ unsigned int net_send(const unsigned char *p, unsigned int n);
 /* Sends all n bytes, polling while the stack drains (netsend.c); 0 if the
  * link died or nothing moved for 1500 frames. */
 unsigned char net_send_all(const unsigned char *p, unsigned int n);
+/* done as a percentage of size, without 32-bit division (netsend.c). */
+unsigned char transfer_percent(unsigned long done, unsigned long size);
 /* Receives up to cap bytes; 0 if none are waiting. */
 unsigned int net_recv(unsigned char *buf, unsigned int cap);
 /* 1 while the peer may still send: not closed, or closed with data still queued. */

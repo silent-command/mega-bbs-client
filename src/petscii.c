@@ -6,6 +6,21 @@ static unsigned char cursor_x = 0;
 static unsigned char cursor_y = 0;
 static unsigned char cur_color = 1; /* White */
 static unsigned char cur_rvs = 0;   /* 0 or 0x80 */
+static unsigned char cur_flash = 0; /* 0 or 0x10, the blink attribute */
+static unsigned char win_cols = 0;  /* a 40-column window on an 80-column screen: its width and offset */
+static unsigned char win_xoff = 0;
+
+void petscii_set_window(unsigned char cols, unsigned char xoff)
+{
+  win_cols = cols;
+  win_xoff = xoff;
+}
+
+void petscii_flush(void)
+{
+  m65_screen_flush();
+  m65_screen_set_cursor((unsigned char)(cursor_x + win_xoff), cursor_y);
+}
 
 unsigned char petscii_to_screencode(unsigned char p)
 {
@@ -28,11 +43,12 @@ void petscii_reset(void)
   cursor_y = 0;
   cur_color = 1;
   cur_rvs = 0;
+  cur_flash = 0;
 }
 
 void petscii_putc(unsigned char c)
 {
-  unsigned char cols = m65_screen_cols();
+  unsigned char cols = win_cols ? win_cols : m65_screen_cols();
   unsigned char rows = m65_screen_rows();
 
   /* Control codes */
@@ -63,9 +79,16 @@ void petscii_putc(unsigned char c)
   case 0x14: /* DEL / Backspace */
     if (cursor_x > 0) {
       cursor_x--;
-      m65_screen_putc(cursor_x, cursor_y, 0x20, cur_color);
+      m65_screen_putc((unsigned char)(cursor_x + win_xoff), cursor_y, 0x20, cur_color);
     }
     return;
+
+  case 0x94: /* Insert: a blank at the cursor, the rest of the line moves right */
+    m65_screen_insert((unsigned char)(cursor_x + win_xoff), cursor_y);
+    return;
+
+  case 0x0f: cur_flash = 0x10; return;   /* Flash on */
+  case 0x8f: cur_flash = 0; return;      /* Flash off */
 
   case 0x11: /* Cursor Down */
     if (cursor_y + 1 < rows) cursor_y++;
@@ -125,7 +148,6 @@ void petscii_putc(unsigned char c)
   case 0x07: /* Bell */
   case 0x08: /* Disable Shift-CBM */
   case 0x09: /* Enable Shift-CBM / Tab */
-  case 0x94: /* Insert */
     return;
 
   default:
@@ -142,7 +164,7 @@ void petscii_putc(unsigned char c)
   /* Printable character */
   {
     unsigned char sc = (unsigned char)(petscii_to_screencode(c) ^ cur_rvs);
-    m65_screen_putc(cursor_x, cursor_y, sc, cur_color);
+    m65_screen_putc_buf((unsigned char)(cursor_x + win_xoff), cursor_y, sc, (unsigned char)(cur_color | cur_flash));
     cursor_x++;
     if (cursor_x >= cols) {
       cursor_x = 0;
@@ -160,6 +182,7 @@ void petscii_write(const unsigned char *buf, unsigned int len)
   while (len--) {
     petscii_putc(*buf++);
   }
+  petscii_flush();
 }
 
 void petscii_get_cursor(unsigned char *x, unsigned char *y)

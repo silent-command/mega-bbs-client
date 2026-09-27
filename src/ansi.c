@@ -1,3 +1,13 @@
+/* ANSI-BBS rendering onto the text screen.
+ *
+ * The VIC-IV text mode has one background colour for the whole screen,
+ * so a cell cannot show a foreground and a background of its own. The
+ * VIC-III attribute bits fill the gap: a coloured background is drawn as
+ * the cell in reverse video in that colour (the glyph goes dark), which
+ * is exact for reverse-video text and for black-on-colour, and keeps
+ * coloured bars whole where earlier code left gaps. Blink and underline
+ * are hardware; bold is the bright half of the palette; iCE colours
+ * (CSI ?33h) make blink mean a bright background instead. */
 #include "ansi.h"
 #include "platform/m65_screen.h"
 
@@ -13,6 +23,7 @@ static unsigned char cursor_x = 0;
 static unsigned char cursor_y = 0;
 static unsigned char saved_x = 0;
 static unsigned char saved_y = 0;
+static unsigned char scroll_top = 0, scroll_bot = 24;
 static ansi_response_fn response_cb = 0;
 
 void ansi_set_response_fn(ansi_response_fn fn)
@@ -20,46 +31,33 @@ void ansi_set_response_fn(ansi_response_fn fn)
   response_cb = fn;
 }
 
-static unsigned char fg_ansi = 7; /* Default light gray / white */
-static unsigned char bg_ansi = 0; /* Default black */
-static unsigned char is_bold = 0;
-static unsigned char is_reverse = 0;
+static unsigned char fg_ansi = 7;       /* 0-15: ANSI colour, 8-15 the bright ones */
+static unsigned char bg_ansi = 0;
+static unsigned char is_bold = 0, is_blink = 0, is_reverse = 0, is_under = 0;
+static unsigned char ice_colors = 0;
 
-static unsigned int args[MAX_ARGS];
+static unsigned char args[MAX_ARGS];    /* an argument above 255 means nothing on this screen */
 static unsigned char argc = 0;
+static unsigned char priv = 0;
 
 /* Standard ANSI (0-7) to VGA palette index (0-7) */
-static const unsigned char ansi_to_vga[8] = {
-  0, /* 0: Black */
-  4, /* 1: Red */
-  2, /* 2: Green */
-  6, /* 3: Yellow/Brown */
-  1, /* 4: Blue */
-  5, /* 5: Magenta */
-  3, /* 6: Cyan */
-  7  /* 7: White/Light Gray */
-};
+static const unsigned char ansi_to_vga[8] = { 0, 4, 2, 6, 1, 5, 3, 7 };
 
-static unsigned char get_active_color(void)
+/* The colour byte for the next cell: colour in the low nibble, the
+ * attributes above it. */
+static __attribute__((noinline)) unsigned char cell_color(void)
 {
-  unsigned char fg = ansi_to_vga[fg_ansi & 7];
-  unsigned char bg = ansi_to_vga[bg_ansi & 7];
-
-  if (is_bold) fg += 8; /* High intensity */
-  if (is_reverse) {
-    unsigned char tmp = fg;
-    fg = bg;
-    bg = tmp;
-  }
-  /* On single-background text mode, black text on non-zero background is invisible.
-   * Render glyph in background accent color so button labels and inverted text are visible. */
-  if (fg == 0 && bg != 0) {
-    return bg;
-  }
-  return fg;
+  unsigned char fg = (unsigned char)(ansi_to_vga[fg_ansi & 7] | (((fg_ansi & 8) || is_bold) ? 8 : 0));
+  unsigned char bg = (unsigned char)(ansi_to_vga[bg_ansi & 7] | (((bg_ansi & 8) || (is_blink && ice_colors)) ? 8 : 0));
+  unsigned char attr = 0;
+  if (is_under) attr |= 0x80;
+  if (is_blink && !ice_colors) attr |= 0x10;
+  if (is_reverse) return (unsigned char)(fg | attr | 0x20);
+  if (bg != 0) return (unsigned char)(bg | attr | 0x20);
+  return (unsigned char)(fg | attr);
 }
 
-static void handle_sgr(void)
+static __attribute__((noinline)) void handle_sgr(void)
 {
   unsigned char i;
   if (argc == 0) {
@@ -67,42 +65,56 @@ static void handle_sgr(void)
     argc = 1;
   }
   for (i = 0; i < argc; i++) {
-    unsigned int a = args[i];
+    unsigned char a = args[i];
     if (a == 0) {
-      /* Reset */
-      fg_ansi = 7;
-      bg_ansi = 0;
-      is_bold = 0;
-      is_reverse = 0;
-    } else if (a == 1) {
-      is_bold = 1;
-    } else if (a == 5) {
-      /* Blink -> treat as bold */
-      is_bold = 1;
-    } else if (a == 7) {
-      is_reverse = 1;
-    } else if (a == 22) {
-      is_bold = 0;
-    } else if (a == 27) {
-      is_reverse = 0;
-    } else if (a >= 30 && a <= 37) {
-      fg_ansi = (unsigned char)(a - 30);
-    } else if (a == 39) {
-      fg_ansi = 7;
-    } else if (a >= 40 && a <= 47) {
-      bg_ansi = (unsigned char)(a - 40);
-    } else if (a == 49) {
-      bg_ansi = 0;
-    }
+      fg_ansi = 7; bg_ansi = 0;
+      is_bold = is_blink = is_reverse = is_under = 0;
+    } else if (a == 1) is_bold = 1;
+    else if (a == 2 || a == 22) is_bold = 0;
+    else if (a == 4) is_under = 1;
+    else if (a == 24) is_under = 0;
+    else if (a == 5 || a == 6) is_blink = 1;
+    else if (a == 25) is_blink = 0;
+    else if (a == 7) is_reverse = 1;
+    else if (a == 27) is_reverse = 0;
+    else if (a >= 30 && a <= 37) fg_ansi = (unsigned char)(a - 30);
+    else if (a == 39) fg_ansi = 7;
+    else if (a >= 40 && a <= 47) bg_ansi = (unsigned char)(a - 40);
+    else if (a == 49) bg_ansi = 0;
+    else if (a >= 90 && a <= 97) fg_ansi = (unsigned char)(a - 90 + 8);
+    else if (a >= 100 && a <= 107) bg_ansi = (unsigned char)(a - 100 + 8);
   }
 }
 
-static void handle_csi(unsigned char cmd)
+static __attribute__((noinline)) void erase(unsigned char x0, unsigned char y0, unsigned char x1, unsigned char y1)
+{
+  unsigned char col = cell_color(), x, y;
+  for (y = y0; y <= y1; y++) {
+    unsigned char a = (y == y0) ? x0 : 0, b = (y == y1) ? x1 : (unsigned char)(m65_screen_cols() - 1);
+    for (x = a; x <= b; x++) m65_screen_putc_buf(x, y, 0x20, col);
+  }
+}
+
+/* A line feed within the scroll region. */
+static __attribute__((noinline)) void line_feed(void)
+{
+  if (cursor_y == scroll_bot) m65_screen_scroll_up(scroll_top, scroll_bot);
+  else if (cursor_y < m65_screen_rows() - 1) cursor_y++;
+}
+
+static __attribute__((noinline)) void handle_csi(unsigned char cmd)
 {
   unsigned char cols = m65_screen_cols();
   unsigned char rows = m65_screen_rows();
-  unsigned int val1 = (argc > 0 && args[0] > 0) ? args[0] : 1;
-  unsigned int val2 = (argc > 1 && args[1] > 0) ? args[1] : 1;
+  unsigned char val1 = (argc > 0 && args[0] > 0) ? args[0] : 1;
+  unsigned char val2 = (argc > 1 && args[1] > 0) ? args[1] : 1;
+  unsigned char raw1 = (argc > 0) ? args[0] : 0;
+
+  if (priv) {
+    if (cmd == 'h' && raw1 == 33) ice_colors = 1;      /* iCE colours: blink is a bright background */
+    if (cmd == 'l' && raw1 == 33) ice_colors = 0;
+    return;                                             /* other private modes (cursor visibility, wrap) are left alone */
+  }
 
   switch (cmd) {
   case 'm': /* SGR - Select Graphic Rendition */
@@ -135,30 +147,51 @@ static void handle_csi(unsigned char cmd)
     else cursor_x = 0;
     break;
 
-  case 'J': /* Erase in Display */
-    if (val1 == 2 || (argc == 0 && args[0] == 2)) {
+  case 'J': /* Erase in Display: 0 to the end, 1 from the start, 2 all */
+    if (raw1 == 2) {
       m65_screen_cls();
       cursor_x = 0;
       cursor_y = 0;
-    } else if (val1 == 0) {
-      /* Clear from cursor to end of screen */
-      unsigned char r;
-      for (r = cursor_y + 1; r < rows; r++) {
-        m65_screen_clear_row(r, 0x20, get_active_color());
-      }
-      for (r = cursor_x; r < cols; r++) {
-        m65_screen_putc(r, cursor_y, 0x20, get_active_color());
-      }
+    } else if (raw1 == 1) {
+      erase(0, 0, cursor_x, cursor_y);
+    } else {
+      erase(cursor_x, cursor_y, (unsigned char)(cols - 1), (unsigned char)(rows - 1));
     }
     break;
 
-  case 'K': /* Erase in Line */
+  case 'K': /* Erase in Line: 0 to the end, 1 from the start, 2 whole */
+    if (raw1 == 2) erase(0, cursor_y, (unsigned char)(cols - 1), cursor_y);
+    else if (raw1 == 1) erase(0, cursor_y, cursor_x, cursor_y);
+    else erase(cursor_x, cursor_y, (unsigned char)(cols - 1), cursor_y);
+    break;
+
+  case 'r': /* Scroll region */
     {
-      unsigned char c;
-      for (c = cursor_x; c < cols; c++) {
-        m65_screen_putc(c, cursor_y, 0x20, get_active_color());
-      }
+      unsigned char top = (unsigned char)(val1 - 1);
+      unsigned char bot = (argc > 1 && args[1] > 0 && args[1] <= rows) ? (unsigned char)(args[1] - 1) : (unsigned char)(rows - 1);
+      if (top < bot && bot < rows) { scroll_top = top; scroll_bot = bot; }
+      else { scroll_top = 0; scroll_bot = (unsigned char)(rows - 1); }
+      cursor_x = 0;
+      cursor_y = scroll_top;
     }
+    break;
+
+  case 'L': /* Insert lines at the cursor, the region's last lines fall off */
+    if (cursor_y >= scroll_top && cursor_y <= scroll_bot)
+      while (val1--) m65_screen_scroll_down(cursor_y, scroll_bot);
+    break;
+
+  case 'M': /* Delete lines at the cursor */
+    if (cursor_y >= scroll_top && cursor_y <= scroll_bot)
+      while (val1--) m65_screen_scroll_up(cursor_y, scroll_bot);
+    break;
+
+  case 'S': /* Scroll the region up */
+    while (val1--) m65_screen_scroll_up(scroll_top, scroll_bot);
+    break;
+
+  case 'T': /* Scroll the region down */
+    while (val1--) m65_screen_scroll_down(scroll_top, scroll_bot);
     break;
 
   case 's': /* Save Cursor Position */
@@ -194,18 +227,12 @@ static void handle_csi(unsigned char cmd)
         response_cb((const unsigned char *)rep, len);
       }
     } else if (val1 == 5) {
-      /* Status: OK -> \x1b[0n */
-      if (response_cb) {
-        response_cb((const unsigned char *)"\x1b[0n", 4);
-      }
+      if (response_cb) response_cb((const unsigned char *)"\x1b[0n", 4);
     }
     break;
 
-  case 'c': /* DA - Device Attributes */
-    /* Standard VT100 response: \x1b[?1;2c */
-    if (response_cb) {
-      response_cb((const unsigned char *)"\x1b[?1;2c", 7);
-    }
+  case 'c': /* DA - Device Attributes: a VT100 with advanced video */
+    if (response_cb) response_cb((const unsigned char *)"\x1b[?1;2c", 7);
     break;
 
   default:
@@ -225,17 +252,19 @@ void ansi_reset(void)
   cursor_y = 0;
   saved_x = 0;
   saved_y = 0;
+  scroll_top = 0;
+  scroll_bot = (unsigned char)(m65_screen_rows() - 1);
   fg_ansi = 7;
   bg_ansi = 0;
-  is_bold = 0;
-  is_reverse = 0;
+  is_bold = is_blink = is_reverse = is_under = 0;
+  ice_colors = 0;
   argc = 0;
+  priv = 0;
 }
 
 void ansi_putc(unsigned char c)
 {
   unsigned char cols = m65_screen_cols();
-  unsigned char rows = m65_screen_rows();
 
   switch (state) {
   case STATE_TEXT:
@@ -244,60 +273,24 @@ void ansi_putc(unsigned char c)
     } else if (c == '\r') {
       cursor_x = 0;
     } else if (c == '\n') {
-      cursor_y++;
-      if (cursor_y >= rows) {
-        m65_screen_scroll_up(0, (unsigned char)(rows - 1));
-        cursor_y = (unsigned char)(rows - 1);
-      }
+      line_feed();
     } else if (c == '\b') {
       if (cursor_x > 0) cursor_x--;
     } else if (c == '\t') {
       cursor_x = (unsigned char)((cursor_x + 8) & ~7);
       if (cursor_x >= cols) {
         cursor_x = 0;
-        cursor_y++;
-        if (cursor_y >= rows) {
-          m65_screen_scroll_up(0, (unsigned char)(rows - 1));
-          cursor_y = (unsigned char)(rows - 1);
-        }
+        line_feed();
       }
-    } else if (c == 0x07) {
-      /* Bell: ignore or brief flash */
     } else if (c < 0x20) {
-      /* Ignore unhandled C0 control codes (NUL, SOH keepalive, etc.) */
+      /* Unhandled C0 controls (NUL, SOH keepalive, BEL) are ignored */
       break;
     } else {
-      /* Printable CP437 character */
-      unsigned char draw_ch = c;
-      unsigned char draw_col = get_active_color();
-
-      if (c == ' ') {
-        if (is_reverse) {
-          draw_ch = 0xdb; /* Full block */
-          draw_col = (unsigned char)(ansi_to_vga[fg_ansi & 7] + (is_bold ? 8 : 0));
-        } else if (bg_ansi != 0) {
-          draw_ch = 0xdb; /* Full block in background color */
-          draw_col = ansi_to_vga[bg_ansi & 7];
-        }
-      } else if (c == 0xdc && (fg_ansi & 7) == 0 && (bg_ansi & 7) != 0) {
-        /* Lower half block with black FG and colored BG -> upper half block in BG color */
-        draw_ch = 0xdf;
-        draw_col = ansi_to_vga[bg_ansi & 7];
-      } else if (c == 0xdf && (fg_ansi & 7) == 0 && (bg_ansi & 7) != 0) {
-        /* Upper half block with black FG and colored BG -> lower half block in BG color */
-        draw_ch = 0xdc;
-        draw_col = ansi_to_vga[bg_ansi & 7];
-      }
-
-      m65_screen_putc(cursor_x, cursor_y, draw_ch, draw_col);
+      m65_screen_putc_buf(cursor_x, cursor_y, c, cell_color());
       cursor_x++;
       if (cursor_x >= cols) {
         cursor_x = 0;
-        cursor_y++;
-        if (cursor_y >= rows) {
-          m65_screen_scroll_up(0, (unsigned char)(rows - 1));
-          cursor_y = (unsigned char)(rows - 1);
-        }
+        line_feed();
       }
     }
     break;
@@ -307,10 +300,10 @@ void ansi_putc(unsigned char c)
       state = STATE_CSI;
       argc = 0;
       args[0] = 0;
+      priv = 0;
     } else if (c == '(' || c == ')') {
       state = STATE_SCS;
     } else {
-      /* Unknown escape, return to text */
       state = STATE_TEXT;
     }
     break;
@@ -322,7 +315,7 @@ void ansi_putc(unsigned char c)
   case STATE_CSI:
     if (c >= '0' && c <= '9') {
       if (argc == 0) argc = 1;
-      args[argc - 1] = args[argc - 1] * 10 + (unsigned int)(c - '0');
+      args[argc - 1] = (args[argc - 1] < 25) ? (unsigned char)(args[argc - 1] * 10 + (c - '0')) : 255;
     } else if (c == ';') {
       if (argc == 0) argc = 1;
       if (argc < MAX_ARGS) {
@@ -330,9 +323,8 @@ void ansi_putc(unsigned char c)
         args[argc - 1] = 0;
       }
     } else if (c == '?') {
-      /* Private mode prefix (DECSET), ignore prefix char */
+      priv = 1;
     } else {
-      /* Command terminator */
       handle_csi(c);
       state = STATE_TEXT;
     }
@@ -340,11 +332,19 @@ void ansi_putc(unsigned char c)
   }
 }
 
+/* Writes what is buffered and puts the cursor where the text ends. */
+void ansi_flush(void)
+{
+  m65_screen_flush();
+  m65_screen_set_cursor(cursor_x, cursor_y);
+}
+
 void ansi_write(const unsigned char *buf, unsigned int len)
 {
   while (len--) {
     ansi_putc(*buf++);
   }
+  ansi_flush();
 }
 
 void ansi_get_cursor(unsigned char *x, unsigned char *y)

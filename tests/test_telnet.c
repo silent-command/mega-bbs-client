@@ -140,6 +140,27 @@ int main(void)
     telnet_reset();
   }
 
+  /* Bytes that could start a header are held back from the screen until
+   * the next byte settles it; a pause releases them. */
+  {
+    telnet_reset();
+    out_char_count = 0;
+    telnet_feed((const unsigned char *)"abc*", 4);
+    assert(out_char_count == 3);                     /* the star waits */
+    telnet_feed((const unsigned char *)"d", 1);
+    assert(out_char_count == 5 && out_buf[3] == '*' && out_buf[4] == 'd');
+    telnet_feed((const unsigned char *)"**\x18" "B0", 5);
+    assert(out_char_count == 5);                     /* five bytes of a possible ZRQINIT held */
+    telnet_feed((const unsigned char *)"x", 1);
+    assert(out_char_count == 11);                    /* it was not one: all six shown */
+    telnet_feed((const unsigned char *)"*", 1);
+    telnet_idle();
+    assert(out_char_count == 12);
+    telnet_feed((const unsigned char *)"**\x18" "B00", 6);
+    assert(out_char_count == 12 && telnet_check_zmodem());   /* a real one: nothing shown */
+    telnet_reset();
+  }
+
   /* Detection hands the header and the rest of the receive to the
    * transfer, which reads them before the network. */
   {
@@ -147,7 +168,7 @@ int main(void)
     out_char_count = 0;
     telnet_feed((const unsigned char *)"hi**\x18" "B00000000000000\r\n\x11" "tail", 27);
     assert(telnet_check_zmodem());
-    assert(out_char_count == 7);                     /* "hi" and the header's first five bytes reached the screen */
+    assert(out_char_count == 2);                     /* "hi" reached the screen, the header did not */
     queue((const unsigned char *)"net", 3);
     assert(telnet_rx_byte(&b) && b == '*');
     assert(telnet_rx_byte(&b) && b == '*');

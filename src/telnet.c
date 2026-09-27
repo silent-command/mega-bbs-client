@@ -49,6 +49,49 @@ static void pushback(const unsigned char *data, unsigned int len)
 static unsigned char zdetect_buf[8];
 static unsigned char zdetect_pos = 0;
 
+/* Bytes that may be the start of a ZRQINIT are held back from the
+ * screen until the next byte settles it, so the header never shows. */
+static unsigned char held[6];
+static unsigned char held_n = 0;
+
+static __attribute__((noinline)) unsigned char is_sig_prefix(const unsigned char *p, unsigned char k)
+{
+  static const unsigned char hex_sig[6] = { '*', '*', 0x18, 'B', '0', '0' };
+  unsigned char i;
+  for (i = 0; i < k; i++) if (p[i] != hex_sig[i]) break;
+  if (i == k) return 1;
+  if (k > 4) return 0;
+  if (p[0] != '*') return 0;
+  if (k > 1 && p[1] != 0x18) return 0;
+  if (k > 2 && p[2] != 'A' && p[2] != 'C') return 0;
+  if (k > 3 && p[3] != 0) return 0;
+  return 1;
+}
+
+static __attribute__((noinline)) void release_held(unsigned char keep)
+{
+  unsigned char i, out = (unsigned char)(held_n - keep);
+  for (i = 0; i < out; i++) if (client_out) client_out(held[i]);
+  for (i = 0; i < keep; i++) held[i] = held[out + i];
+  held_n = keep;
+}
+
+/* A byte for the screen, unless it could be a header's first bytes. */
+static __attribute__((noinline)) void out_or_hold(unsigned char c)
+{
+  unsigned char k;
+  if (held_n >= sizeof(held)) release_held(0);
+  held[held_n++] = c;
+  for (k = held_n; k > 0; k--)
+    if (is_sig_prefix(held + held_n - k, k)) break;
+  release_held(k);
+}
+
+void telnet_idle(void)
+{
+  release_held(0);
+}
+
 static unsigned char check_zmodem_seq(unsigned char c)
 {
   unsigned char i;
@@ -116,6 +159,7 @@ void telnet_reset(void)
   bin_tx = 0;
   pb_len = 0;
   pb_pos = 0;
+  held_n = 0;
 }
 
 unsigned char telnet_binary(void)
@@ -213,11 +257,12 @@ void telnet_feed(const unsigned char *data, unsigned int len)
       } else {
         unsigned char m = check_zmodem_seq(c);
         if (m) {
+          held_n = 0;                             /* the header's bytes were held, not shown */
           pushback(&zdetect_buf[zdetect_pos - m], m);
           pushback(data, len);
           return;
         }
-        if (client_out) client_out(c);
+        out_or_hold(c);
       }
       break;
 

@@ -368,10 +368,7 @@ static unsigned char flush_far(unsigned int n)
 
 static void update_progress(void)
 {
-  if (cur_status.file_size > 0) {
-    cur_status.percent = (unsigned char)((cur_status.bytes_transferred * 100) / cur_status.file_size);
-    if (cur_status.percent > 100) cur_status.percent = 100;
-  }
+  if (cur_status.file_size) cur_status.percent = transfer_percent(cur_status.bytes_transferred, cur_status.file_size);
   if (progress_cb) progress_cb(&cur_status);
 }
 
@@ -543,13 +540,25 @@ __attribute__((noinline)) unsigned char zmodem_receive(unsigned char drive)
 
 /* ---- sending a file --------------------------------------------------- */
 
+/* Decimal without division: a file on a D81 is under a million bytes. */
+static void format_size(char *out, unsigned long v)
+{
+  static const unsigned long p10[6] = { 100000UL, 10000UL, 1000UL, 100UL, 10UL, 1UL };
+  unsigned char i, n = 0;
+  for (i = 0; i < 6; i++) {
+    unsigned char d = 0;
+    while (v >= p10[i]) { v -= p10[i]; d++; }
+    if (d || n || i == 5) out[n++] = (char)('0' + d);
+  }
+  out[n] = 0;
+}
+
 static __attribute__((noinline)) void send_zfile_subpacket(const char *filename)
 {
   const char *p = filename;
   unsigned int crc = 0;
-  char sz_str[12];
-  unsigned long tmp = cur_status.file_size;
-  char *sp = sz_str + sizeof(sz_str) - 1;
+  char sz_str[8];
+  char *sp = sz_str;
 
   send_hex_header(ZFILE, 0);
 
@@ -560,16 +569,7 @@ static __attribute__((noinline)) void send_zfile_subpacket(const char *filename)
   tx_escaped(0);
   crc = z_crc16(crc, 0);
 
-  /* Format file size string in decimal */
-  *sp = 0;
-  if (tmp == 0) {
-    *--sp = '0';
-  } else {
-    while (tmp > 0) {
-      *--sp = (char)('0' + (tmp % 10));
-      tmp /= 10;
-    }
-  }
+  format_size(sz_str, cur_status.file_size);
   while (*sp) {
     crc = z_crc16(crc, (unsigned char)*sp);
     tx_escaped((unsigned char)*sp++);

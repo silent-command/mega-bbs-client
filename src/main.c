@@ -103,6 +103,23 @@ static __attribute__((noinline)) void handle_download(unsigned char act)
   }
 }
 
+/* The screen for the active site: RES_40IN80 is an 80-column screen
+ * with PETSCII drawn in a 40-column window in the middle, and the board
+ * told it has 40 columns. */
+static __attribute__((noinline)) void apply_res(void)
+{
+  unsigned char narrow = (active_res == RES_40IN80);
+  m65_screen_set_res(narrow ? RES_80X25 : active_res);
+  m65_screen_set_emul(active_emul);
+  petscii_set_window(narrow ? 40 : 0, narrow ? 20 : 0);
+}
+
+static void term_flush(void)
+{
+  if (active_emul == EMUL_ANSI) ansi_flush();
+  else petscii_flush();
+}
+
 static __attribute__((noinline)) void handle_terminal_transfer(void)
 {
   unsigned char act = ui_transfer_menu();
@@ -114,8 +131,7 @@ static __attribute__((noinline)) void handle_terminal_transfer(void)
   } else if (act == TRANSFER_ACT_Z_DOWN || act == TRANSFER_ACT_X_DOWN) {
     handle_download(act);
   }
-  m65_screen_set_res(active_res);
-  m65_screen_set_emul(active_emul);
+  apply_res();
 }
 
 static __attribute__((noinline)) void send_terminal_key(unsigned char k)
@@ -158,17 +174,20 @@ static __attribute__((noinline)) void run_terminal_session(bookmark_t *bm)
   active_res = bm->res;
 
   /* Configure screen and emulation */
-  m65_screen_set_res(active_res);
-  m65_screen_set_emul(active_emul);
+  apply_res();
   m65_screen_cls();
 
   ansi_reset();
   petscii_reset();
   telnet_reset();
   telnet_set_terminal_type(active_emul == EMUL_ANSI ? "ANSI" : "PETSCII");
-  telnet_set_window_size(m65_screen_cols(), m65_screen_rows());
-  telnet_send_naws(m65_screen_cols(), m65_screen_rows());
+  {
+    unsigned char c = (active_res == RES_40IN80) ? 40 : m65_screen_cols();
+    telnet_set_window_size(c, m65_screen_rows());
+    telnet_send_naws(c, m65_screen_rows());
+  }
   telnet_send_init_negotiation();
+  m65_screen_cursor_enable(1);
 
   for (;;) {
     unsigned char k;
@@ -179,16 +198,21 @@ static __attribute__((noinline)) void run_terminal_session(bookmark_t *bm)
     n = net_recv(rx_buf, RX_BUF_SIZE);
     if (n > 0) {
       telnet_feed(rx_buf, n);
+      term_flush();
 
       /* Auto-detect ZModem download */
       if (telnet_check_zmodem()) {
         telnet_clear_zmodem();
+        m65_screen_cursor_enable(0);
         zmodem_receive(work_drive);
         hold_transfer_progress();
-        /* Redraw terminal after transfer */
-        m65_screen_set_res(active_res);
-        m65_screen_set_emul(active_emul);
+        apply_res();
+        m65_screen_cursor_enable(1);
       }
+    } else {
+      telnet_idle();
+      term_flush();
+      m65_screen_cursor_tick();
     }
 
     /* Check connection health */
@@ -204,7 +228,9 @@ static __attribute__((noinline)) void run_terminal_session(bookmark_t *bm)
         /* Disconnect / return to Dialing Directory */
         break;
       } else if (IS_KEY_F5(k)) {
+        m65_screen_cursor_enable(0);
         handle_terminal_transfer();
+        m65_screen_cursor_enable(1);
       } else if (IS_KEY_F7(k)) {
         work_drive ^= 1;                  /* shown in the transfer menu's title */
       } else {
@@ -213,6 +239,7 @@ static __attribute__((noinline)) void run_terminal_session(bookmark_t *bm)
     }
   }
 
+  m65_screen_cursor_enable(0);
   net_abort();
 }
 

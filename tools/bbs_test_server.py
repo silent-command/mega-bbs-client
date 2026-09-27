@@ -642,6 +642,7 @@ MENU = (
     "  [5] XMODEM Download, 128-byte blocks\r\n"
     "  [6] XMODEM-1K Download\r\n"
     "  [7] XMODEM Upload\r\n"
+    "  [8] ANSI rendering test (ANSI mode)\r\n"
     "  [Q] Disconnect\r\n\r\n"
 )
 
@@ -655,6 +656,28 @@ def build_menu(mode, fname, size):
                 + b"\x1b[0;37mSelect option: ")
     return (b"\x93\x0e\x9f" + to_petscii(f"{'=' * 80}\r\n{head:^80}\r\n{'=' * 80}\r\n")
             + b"\x9e" + to_petscii(info) + b"\x1e" + to_petscii(MENU) + b"\x05" + to_petscii("Select option: "))
+
+
+def ansi_test_screen():
+    """Exercises what the client renders: the 16 colours, bright and bold,
+    a coloured bar with text on it, reverse, blink, underline, iCE
+    colours, a scroll region with insert and delete, and the erase forms."""
+    e = "\x1b["
+    out = [e + "2J" + e + "H" + e + "0m"]
+    out.append("Colours 30-37, bright 90-97, bold 1;3x:\r\n")
+    out.append("".join(f"{e}{30 + i}m#{e}{90 + i}m#{e}1;{30 + i}m#{e}0m " for i in range(8)) + "\r\n")
+    out.append("Backgrounds 40-47 and 100-107 with text on them:\r\n")
+    out.append("".join(f"{e}{40 + i}m Ab {e}0m" for i in range(8)) + "  " + "".join(f"{e}{100 + i}m Ab {e}0m" for i in range(8)) + "\r\n")
+    out.append(e + "37;44m  white on blue bar with text in it   " + e + "0m\r\n")
+    out.append(e + "7mreverse" + e + "0m " + e + "5mblink" + e + "0m " + e + "4munderline" + e + "0m " + e + "?33h" + e + "5;44m iCE: blink means bright blue " + e + "0m" + e + "?33l\r\n")
+    out.append(e + "30;41m black on red " + e + "0m " + e + "1;33;42m bold yellow on green " + e + "0m\r\n\r\n")
+    out.append("Scroll region rows 10-14: lines 1-8 printed, so 4-8 should show, then a line inserted at row 11 and one deleted:\r\n")
+    out.append(e + "10;14r" + e + "10;1H")
+    out.append("".join(f"line {i}\r\n" for i in range(1, 9))[:-2])
+    out.append(e + "11;1H" + e + "L" + "INSERTED" + e + "13;1H" + e + "M" + e + "r")
+    out.append(e + "17;1H" + "Erase: [1K clears left of the cursor] " + e + "17;8H" + e + "1K" + e + "17;40H" + "<- 'Erase: ' gone, rest stays\r\n")
+    out.append(e + "19;1H" + "Cursor should blink at the end of this line: ")
+    return "".join(out).encode("latin1")
 
 
 def make_test_file(path):
@@ -722,7 +745,7 @@ def handle_client(conn, addr, args):
                 if b is None:
                     return
                 c = from_petscii(bytes([b]))[0] if mode == "petscii" else b
-                if chr(c).upper() in "1234567Q":
+                if chr(c).upper() in "12345678Q":
                     choice = chr(c).upper()
             print(f"[server] option {choice}", flush=True)
 
@@ -774,6 +797,9 @@ def handle_client(conn, addr, args):
             elif choice == "7":
                 say("\r\nReady for an XMODEM upload: choose XMODEM Upload in the client's transfer menu.\r\n")
                 transfer(xmodem_recv_file)
+            elif choice == "8":
+                link.send(ansi_test_screen())
+                wait_enter()
     except (ConnectionError, OSError) as e:
         print(f"[server] {e}", flush=True)
     finally:

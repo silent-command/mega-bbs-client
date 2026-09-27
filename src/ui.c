@@ -42,10 +42,48 @@ static void puts_centered(unsigned char row, const char *text, unsigned char col
   m65_screen_puts((cols > len) ? (unsigned char)((cols - len) / 2) : 0, row, text, color);
 }
 
+
 #define THEME_PRI (ui_themes[active_theme].primary)
 #define THEME_SEC (ui_themes[active_theme].secondary)
 #define THEME_TXT (ui_themes[active_theme].text)
 #define THEME_HI  (ui_themes[active_theme].highlight)
+
+/* The decimal digits of v, ending just before *end (which becomes the
+ * NUL); returns where they start. */
+static __attribute__((noinline)) char *fmt_uint(char *end, unsigned int v)
+{
+  *end = 0;
+  do { *--end = (char)('0' + v % 10); v /= 10; } while (v);
+  return end;
+}
+
+#define BOX_CENTER 0xff
+
+/* One row of a bordered box of width w at x: text between the bars at
+ * offset pad (BOX_CENTER to center it), or a border row when text is 0. */
+static __attribute__((noinline)) void box_row(unsigned char x, unsigned char y, unsigned char w,
+                                              const char *text, unsigned char pad, unsigned char color)
+{
+  char line[82];
+  unsigned char inner = (unsigned char)(w - 2), i, n;
+  if (!text) {
+    line[0] = '+';
+    for (i = 1; i < w - 1; i++) line[i] = '-';
+    line[w - 1] = '+';
+    line[w] = 0;
+    m65_screen_puts(x, y, line, THEME_PRI);
+    return;
+  }
+  for (i = 0; i < inner; i++) line[i] = ' ';
+  n = (unsigned char)strlen(text);
+  if (pad == BOX_CENTER) pad = (inner > n) ? (unsigned char)((inner - n) / 2) : 0;
+  if (n > inner - pad) n = (unsigned char)(inner - pad);
+  memcpy(line + pad, text, n);
+  line[inner] = 0;
+  m65_screen_putc(x, y, '|', THEME_PRI);
+  m65_screen_puts((unsigned char)(x + 1), y, line, color);
+  m65_screen_putc((unsigned char)(x + w - 1), y, '|', THEME_PRI);
+}
 
 unsigned char ui_key(void)
 {
@@ -170,7 +208,7 @@ void ui_draw_status(const char *bbs_name, unsigned char emul, unsigned char res,
  * when the size is unknown (XMODEM carries none). Shared by both
  * protocols: it was two copies. */
 static __attribute__((noinline)) void draw_progress(const char *title, const char *filename,
-                                                    unsigned char percent, unsigned int blocks)
+                                                    unsigned char percent, unsigned int blocks, unsigned char full)
 {
   unsigned char cols = m65_screen_cols();
   unsigned char rows = m65_screen_rows();
@@ -179,63 +217,45 @@ static __attribute__((noinline)) void draw_progress(const char *title, const cha
   unsigned char inner_w = (unsigned char)(width - 2);
   unsigned char start_x = (unsigned char)((cols - width) / 2);
   unsigned char bar_len = (unsigned char)(inner_w - 12);
-  unsigned char filled;
   char line[64];
-  unsigned char i, r;
-  unsigned char tlen = (unsigned char)strlen(title);
-  unsigned char tpad = (inner_w > tlen) ? (unsigned char)((inner_w - tlen) / 2) : 0;
+  unsigned char i;
 
-  /* Rows 0 and 4: the borders */
-  line[0] = '+';
-  for (i = 1; i < width - 1; i++) line[i] = '-';
-  line[width - 1] = '+';
-  line[width] = 0;
-  m65_screen_puts(start_x, start_y, line, THEME_PRI);
-  m65_screen_puts(start_x, (unsigned char)(start_y + 4), line, THEME_PRI);
-
-  for (r = 1; r <= 3; r++) {
-    unsigned char y = (unsigned char)(start_y + r);
-    for (i = 0; i < inner_w; i++) line[i] = ' ';
-    if (r == 1) {
-      memcpy(line + tpad, title, tlen);
-    } else if (r == 2) {
-      unsigned char flen = (unsigned char)strlen(filename), pad;
-      if (flen > inner_w - 8) flen = (unsigned char)(inner_w - 8);
-      pad = (unsigned char)((inner_w - 6 - flen) / 2);   /* centered, like the title */
-      memcpy(line + pad, "File: ", 6);
-      memcpy(line + pad + 6, filename, flen);
-    } else if (blocks == 0xffff) {
-      filled = (unsigned char)((percent * bar_len) / 100);
-      line[1] = '[';
-      for (i = 0; i < bar_len; i++) line[2 + i] = (i < filled) ? '=' : ' ';
-      line[2 + bar_len] = ']';
-      line[4 + bar_len] = (char)('0' + (percent / 100));
-      line[5 + bar_len] = (char)('0' + ((percent % 100) / 10));
-      line[6 + bar_len] = (char)('0' + (percent % 10));
-      line[7 + bar_len] = '%';
-    } else {
-      char num_buf[8];
-      char *p = num_buf + sizeof(num_buf) - 1;
-      *p = 0;
-      if (blocks == 0) *--p = '0';
-      else { while (blocks > 0) { *--p = (char)('0' + (blocks % 10)); blocks /= 10; } }
-      memcpy(line + 1, "Blocks: ", 8);
-      memcpy(line + 9, p, strlen(p));
-    }
-    line[inner_w] = 0;
-    m65_screen_putc(start_x, y, '|', THEME_PRI);
-    m65_screen_puts((unsigned char)(start_x + 1), y, line, (r == 1) ? THEME_SEC : THEME_TXT);
-    m65_screen_putc((unsigned char)(start_x + width - 1), y, '|', THEME_PRI);
+  /* Borders, title and file rows only when the box first appears or the
+   * file changes; later calls redraw the bar. */
+  if (full) {
+    box_row(start_x, start_y, width, 0, 0, 0);
+    box_row(start_x, (unsigned char)(start_y + 4), width, 0, 0, 0);
+    box_row(start_x, (unsigned char)(start_y + 1), width, title, BOX_CENTER, THEME_SEC);
+    memcpy(line, "File: ", 6);
+    strncpy(line + 6, filename, 20);
+    line[26] = 0;
+    box_row(start_x, (unsigned char)(start_y + 2), width, line, BOX_CENTER, THEME_TXT);
   }
+  if (blocks == 0xffff) {
+    unsigned char filled = (unsigned char)((percent * bar_len) / 100);
+    line[0] = '[';
+    for (i = 0; i < bar_len; i++) line[1 + i] = (i < filled) ? '=' : ' ';
+    line[1 + bar_len] = ']';
+    line[2 + bar_len] = ' ';
+    line[3 + bar_len] = (char)('0' + (percent / 100));
+    line[4 + bar_len] = (char)('0' + ((percent % 100) / 10));
+    line[5 + bar_len] = (char)('0' + (percent % 10));
+    line[6 + bar_len] = '%';
+    line[7 + bar_len] = 0;
+  } else {
+    memcpy(line, "Blocks: ", 8);
+    strcpy(line + 8, fmt_uint(line + 20, blocks));
+  }
+  box_row(start_x, (unsigned char)(start_y + 3), width, line, 1, THEME_TXT);
 }
 
 /* "NAME exists. Overwrite? [Y/N]" under the transfer box; 1 for yes. */
 unsigned char ui_confirm_overwrite(const char *name)
 {
   unsigned char row = (m65_screen_rows() > 25) ? 23 : 13;
-  unsigned char k, yes = 0;
   unsigned char len = (unsigned char)(strlen(name) + 25), cols = m65_screen_cols();
   unsigned char col = (cols > len) ? (unsigned char)((cols - len) / 2) : 0;
+  unsigned char k, yes = 0;
   m65_screen_clear_row(row, ' ', 1);
   m65_screen_puts(col, row, name, 2);
   m65_screen_puts((unsigned char)(col + strlen(name)), row, " exists. Overwrite? [Y/N]", 2);
@@ -250,13 +270,14 @@ unsigned char ui_confirm_overwrite(const char *name)
 
 void ui_draw_zmodem_progress(const zmodem_status_t *st)
 {
-  draw_progress(st->is_upload ? "[ ZMODEM UPLOAD ]" : "[ ZMODEM DOWNLOAD ]", st->filename, st->percent, 0xffff);
+  draw_progress(st->is_upload ? "[ ZMODEM UPLOAD ]" : "[ ZMODEM DOWNLOAD ]", st->filename, st->percent, 0xffff,
+                st->bytes_transferred == 0);
 }
 
 void ui_draw_xmodem_progress(const xmodem_status_t *st)
 {
   draw_progress(st->is_upload ? "[ XMODEM UPLOAD ]" : "[ XMODEM DOWNLOAD ]", st->filename, st->percent,
-                st->file_size ? 0xffff : st->blocks);
+                st->file_size ? 0xffff : st->blocks, st->bytes_transferred == 0);
 }
 
 unsigned char ui_transfer_menu(void)
@@ -264,63 +285,24 @@ unsigned char ui_transfer_menu(void)
   unsigned char cols = m65_screen_cols();
   unsigned char rows = m65_screen_rows();
   unsigned char width = (cols >= 80) ? 38 : 34;
-  unsigned char height = 9;
-  unsigned char inner_w = (unsigned char)(width - 2);
   unsigned char start_x = (unsigned char)((cols - width) / 2);
   unsigned char start_y = (rows > 25) ? 18 : 7;
-  char line[64];
-  unsigned char i;
   static char title[] = "[ FILE TRANSFER - DRIVE 8 ]";   /* the digit follows work_drive */
-  unsigned char tlen = (unsigned char)(sizeof(title) - 1);
-  unsigned char tpad = (inner_w > tlen) ? (unsigned char)((inner_w - tlen) / 2) : 0;
+  static const char *const opts[] = {
+    "[1] ZMODEM Upload", "[2] ZMODEM Download", "[3] XMODEM Upload", "[4] XMODEM Download", "[ESC] Cancel"
+  };
+  unsigned char r;
 
-  /* Top border */
-  line[0] = '+';
-  for (i = 1; i < width - 1; i++) line[i] = '-';
-  line[width - 1] = '+';
-  line[width] = 0;
-  m65_screen_puts(start_x, start_y, line, THEME_PRI);
-
-  /* Options */
-  {
-    const char *opts[] = {
-      "[1] ZMODEM Upload",
-      "[2] ZMODEM Download",
-      "[3] XMODEM Upload",
-      "[4] XMODEM Download",
-      "[ESC] Cancel"
-    };
-    unsigned char r;
-    for (r = 0; r < 5; r++) {
-      for (i = 0; i < inner_w; i++) line[i] = ' ';
-      line[0] = ' ';
-      memcpy(line + 1, opts[r], strlen(opts[r]));
-      line[inner_w] = 0;
-      m65_screen_putc(start_x, (unsigned char)(start_y + 2 + r), '|', THEME_PRI);
-      m65_screen_puts((unsigned char)(start_x + 1), (unsigned char)(start_y + 2 + r), line, (r == 4) ? THEME_TXT : THEME_SEC);
-      m65_screen_putc((unsigned char)(start_x + width - 1), (unsigned char)(start_y + 2 + r), '|', THEME_PRI);
-    }
-  }
-
-  /* Bottom border */
-  line[0] = '+';
-  for (i = 1; i < width - 1; i++) line[i] = '-';
-  line[width - 1] = '+';
-  line[width] = 0;
-  m65_screen_puts(start_x, (unsigned char)(start_y + height - 1), line, THEME_PRI);
+  box_row(start_x, start_y, width, 0, 0, 0);
+  for (r = 0; r < 5; r++)
+    box_row(start_x, (unsigned char)(start_y + 2 + r), width, opts[r], 1, (r == 4) ? THEME_TXT : THEME_SEC);
+  box_row(start_x, (unsigned char)(start_y + 7), width, "", 0, THEME_TXT);
+  box_row(start_x, (unsigned char)(start_y + 8), width, 0, 0, 0);
 
   for (;;) {
     unsigned char k;
-
-    /* Title row, redrawn when F7 changes the drive */
     title[24] = (char)('8' + work_drive);
-    for (i = 0; i < inner_w; i++) line[i] = ' ';
-    memcpy(line + tpad, title, tlen);
-    line[inner_w] = 0;
-    m65_screen_putc(start_x, (unsigned char)(start_y + 1), '|', THEME_PRI);
-    m65_screen_puts((unsigned char)(start_x + 1), (unsigned char)(start_y + 1), line, THEME_PRI);
-    m65_screen_putc((unsigned char)(start_x + width - 1), (unsigned char)(start_y + 1), '|', THEME_PRI);
-
+    box_row(start_x, (unsigned char)(start_y + 1), width, title, BOX_CENTER, THEME_PRI);
     k = ui_wait_key();
     if (k == '1') return TRANSFER_ACT_Z_UP;
     if (k == '2') return TRANSFER_ACT_Z_DOWN;
@@ -372,7 +354,7 @@ static void draw_dir_screen(unsigned char selected, unsigned char top_index)
     color = (idx == selected) ? THEME_HI : THEME_TXT;
     num = (unsigned int)(idx + 1);
     em_str = (bm->emul == EMUL_ANSI) ? "ANSI" : "PET ";
-    rs_str = (bm->res == RES_40X25) ? "40x25" : (bm->res == RES_80X50) ? "80x50" : "80x25";
+    rs_str = (bm->res == RES_40X25) ? "40x25" : (bm->res == RES_80X50) ? "80x50" : (bm->res == RES_40IN80) ? "40/80" : "80x25";
 
     memset(row_str, ' ', cols);
     row_str[cols] = 0;
@@ -462,31 +444,16 @@ static void draw_dir_screen(unsigned char selected, unsigned char top_index)
 
   /* Scroll indicator if count > page_size */
   if (count > page_size) {
-    char s_info[40];
+    char s_info[40], num[8];
     unsigned char shown_to = (unsigned char)(top_index + page_size);
     if (shown_to > count) shown_to = count;
     strcpy(s_info, "[UP/DN: Scroll (");
-    if (top_index + 1 < 10) {
-      s_info[16] = (char)('0' + (top_index + 1));
-      s_info[17] = '-';
-      s_info[18] = 0;
-    } else {
-      s_info[16] = (char)('0' + ((top_index + 1) / 10));
-      s_info[17] = (char)('0' + ((top_index + 1) % 10));
-      s_info[18] = '-';
-      s_info[19] = 0;
-    }
-    {
-      char tmp[16];
-      unsigned char p = 0;
-      if (shown_to < 10) tmp[p++] = (char)('0' + shown_to);
-      else { tmp[p++] = (char)('0' + (shown_to / 10)); tmp[p++] = (char)('0' + (shown_to % 10)); }
-      tmp[p++] = '/';
-      if (count < 10) tmp[p++] = (char)('0' + count);
-      else { tmp[p++] = (char)('0' + (count / 10)); tmp[p++] = (char)('0' + (count % 10)); }
-      tmp[p++] = ')'; tmp[p++] = ']'; tmp[p] = 0;
-      strcat(s_info, tmp);
-    }
+    strcat(s_info, fmt_uint(num + 7, (unsigned int)(top_index + 1)));
+    strcat(s_info, "-");
+    strcat(s_info, fmt_uint(num + 7, shown_to));
+    strcat(s_info, "/");
+    strcat(s_info, fmt_uint(num + 7, count));
+    strcat(s_info, ")]");
     puts_centered((unsigned char)(sep_row - 1), s_info, THEME_SEC);
   }
 
@@ -613,6 +580,41 @@ static void save_or_warn(unsigned char boot_drive, unsigned char row)
     ui_wait_key();
   }
 }
+/* The prompts for a site's fields, prefilled from *bm; 1 when the name,
+ * host and port were answered (emulation and resolution keep their values
+ * when skipped). Shared by Add and Edit. */
+static __attribute__((noinline)) unsigned char edit_site(bookmark_t *bm, unsigned char row)
+{
+  char p_str[8];
+  char opt_str[4];
+  unsigned int pt = 0;
+  char *p;
+
+  p = fmt_uint(p_str + 7, bm->port);
+  memmove(p_str, p, strlen(p) + 1);
+  m65_screen_clear_row(row, ' ', 1);
+  m65_screen_clear_row((unsigned char)(row + 1), ' ', 1);
+  if (!ui_read_line(row, "Name: ", bm->name, NAME_MAX - 1) ||
+      !ui_read_line((unsigned char)(row + 1), "Host: ", bm->host, HOST_MAX - 1)) return 0;
+  m65_screen_clear_row((unsigned char)(row + 1), ' ', 1);
+  if (!ui_read_line(row, "Port: ", p_str, 6)) return 0;
+  for (p = p_str; *p >= '0' && *p <= '9'; p++) pt = pt * 10 + (unsigned int)(*p - '0');
+  if (pt) bm->port = pt;
+
+  opt_str[0] = (char)('1' + bm->emul);
+  opt_str[1] = 0;
+  m65_screen_clear_row(row, ' ', 1);
+  if (ui_read_line(row, "Emul [1=PETSCII, 2=ANSI]: ", opt_str, 2) && opt_str[0] >= '1' && opt_str[0] <= '2')
+    bm->emul = (unsigned char)(opt_str[0] - '1');
+
+  opt_str[0] = (char)('1' + bm->res);
+  opt_str[1] = 0;
+  m65_screen_clear_row(row, ' ', 1);
+  if (ui_read_line(row, "Res [1=40x25, 2=80x25, 3=80x50, 4=40 in 80]: ", opt_str, 2) && opt_str[0] >= '1' && opt_str[0] <= '4')
+    bm->res = (unsigned char)(opt_str[0] - '1');
+  return 1;
+}
+
 unsigned char ui_dialing_directory(unsigned char boot_drive)
 {
   unsigned char selected = 0;
@@ -688,107 +690,22 @@ unsigned char ui_dialing_directory(unsigned char boot_drive)
         }
       }
     } else if (k == 'a' || k == 'A') {
-      /* Add bookmark */
       bookmark_t new_bm;
-      char p_str[8];
-      char opt_str[4];
       memset(&new_bm, 0, sizeof(new_bm));
-      strcpy(p_str, "23");
-
-      m65_screen_clear_row(prompt_row, ' ', 1);
-      m65_screen_clear_row((unsigned char)(prompt_row + 1), ' ', 1);
-      if (ui_read_line(prompt_row, "Name: ", new_bm.name, NAME_MAX - 1) &&
-          ui_read_line((unsigned char)(prompt_row + 1), "Host: ", new_bm.host, HOST_MAX - 1)) {
-        m65_screen_clear_row((unsigned char)(prompt_row + 1), ' ', 1);
-        if (ui_read_line(prompt_row, "Port: ", p_str, 6)) {
-          unsigned int pt = 0;
-          char *p = p_str;
-          while (*p >= '0' && *p <= '9') pt = pt * 10 + (*p++ - '0');
-          new_bm.port = pt ? pt : 23;
-
-          /* Emulation */
-          new_bm.emul = EMUL_PETSCII;
-          opt_str[0] = '1';
-          opt_str[1] = 0;
-          m65_screen_clear_row(prompt_row, ' ', 1);
-          if (ui_read_line(prompt_row, "Emul [1=PETSCII, 2=ANSI]: ", opt_str, 2)) {
-            if (opt_str[0] == '1') new_bm.emul = EMUL_PETSCII;
-            else if (opt_str[0] == '2') new_bm.emul = EMUL_ANSI;
-          }
-
-          /* Resolution */
-          new_bm.res = menu_res;
-          opt_str[0] = (char)('1' + new_bm.res);
-          opt_str[1] = 0;
-          m65_screen_clear_row(prompt_row, ' ', 1);
-          if (ui_read_line(prompt_row, "Res [1=40x25, 2=80x25, 3=80x50]: ", opt_str, 2)) {
-            if (opt_str[0] == '1') new_bm.res = RES_40X25;
-            else if (opt_str[0] == '2') new_bm.res = RES_80X25;
-            else if (opt_str[0] == '3') new_bm.res = RES_80X50;
-          }
-
-          bookmarks_add(&new_bm);
-          save_or_warn(boot_drive, prompt_row);
-        }
+      new_bm.port = 23;
+      new_bm.res = menu_res;
+      if (edit_site(&new_bm, prompt_row)) {
+        bookmarks_add(&new_bm);
+        save_or_warn(boot_drive, prompt_row);
       }
     } else if (k == 'e' || k == 'E') {
-      /* Edit bookmark */
       if (count > 0) {
         bookmark_t *cur = bookmarks_get(selected);
         if (cur) {
           bookmark_t edit_bm = *cur;
-          char p_str[8];
-          char opt_str[4];
-
-          /* Port to string */
-          {
-            unsigned int pv = edit_bm.port;
-            char *p = p_str + sizeof(p_str) - 1;
-            *p = 0;
-            if (pv == 0) *--p = '0';
-            else {
-              while (pv > 0) {
-                *--p = (char)('0' + (pv % 10));
-                pv /= 10;
-              }
-            }
-            memmove(p_str, p, strlen(p) + 1);
-          }
-
-          m65_screen_clear_row(prompt_row, ' ', 1);
-          m65_screen_clear_row((unsigned char)(prompt_row + 1), ' ', 1);
-
-          if (ui_read_line(prompt_row, "Name: ", edit_bm.name, NAME_MAX - 1) &&
-              ui_read_line((unsigned char)(prompt_row + 1), "Host: ", edit_bm.host, HOST_MAX - 1)) {
-            m65_screen_clear_row((unsigned char)(prompt_row + 1), ' ', 1);
-            if (ui_read_line(prompt_row, "Port: ", p_str, 6)) {
-              unsigned int pt = 0;
-              char *p = p_str;
-              while (*p >= '0' && *p <= '9') pt = pt * 10 + (*p++ - '0');
-              if (pt) edit_bm.port = pt;
-
-              /* Emulation */
-              opt_str[0] = (char)('1' + edit_bm.emul);
-              opt_str[1] = 0;
-              m65_screen_clear_row(prompt_row, ' ', 1);
-              if (ui_read_line(prompt_row, "Emul [1=PETSCII, 2=ANSI]: ", opt_str, 2)) {
-                if (opt_str[0] == '1') edit_bm.emul = EMUL_PETSCII;
-                else if (opt_str[0] == '2') edit_bm.emul = EMUL_ANSI;
-              }
-
-              /* Resolution */
-              opt_str[0] = (char)('1' + edit_bm.res);
-              opt_str[1] = 0;
-              m65_screen_clear_row(prompt_row, ' ', 1);
-              if (ui_read_line(prompt_row, "Res [1=40x25, 2=80x25, 3=80x50]: ", opt_str, 2)) {
-                if (opt_str[0] == '1') edit_bm.res = RES_40X25;
-                else if (opt_str[0] == '2') edit_bm.res = RES_80X25;
-                else if (opt_str[0] == '3') edit_bm.res = RES_80X50;
-              }
-
-              bookmarks_update(selected, &edit_bm);
-              save_or_warn(boot_drive, prompt_row);
-            }
+          if (edit_site(&edit_bm, prompt_row)) {
+            bookmarks_update(selected, &edit_bm);
+            save_or_warn(boot_drive, prompt_row);
           }
         }
       }
@@ -866,49 +783,12 @@ static __attribute__((noinline)) void pk_write(unsigned char i)
 
 static void format_picker_box(unsigned char start_x, unsigned char start_y, unsigned char width, unsigned char height, const char *title)
 {
-  char line[64];
-  unsigned char i, r;
-  unsigned char inner_w = (unsigned char)(width - 2);
-  unsigned char tlen = (unsigned char)strlen(title);
-  unsigned char tpad = (inner_w > tlen) ? (unsigned char)((inner_w - tlen) / 2) : 0;
-
-  /* Top border */
-  line[0] = '+';
-  for (i = 1; i < width - 1; i++) line[i] = '-';
-  line[width - 1] = '+';
-  line[width] = 0;
-  m65_screen_puts(start_x, start_y, line, THEME_PRI);
-
-  /* Title row */
-  for (i = 0; i < inner_w; i++) line[i] = ' ';
-  memcpy(line + tpad, title, tlen);
-  line[inner_w] = 0;
-  m65_screen_putc(start_x, (unsigned char)(start_y + 1), '|', THEME_PRI);
-  m65_screen_puts((unsigned char)(start_x + 1), (unsigned char)(start_y + 1), line, THEME_SEC);
-  m65_screen_putc((unsigned char)(start_x + width - 1), (unsigned char)(start_y + 1), '|', THEME_PRI);
-
-  /* Subheader / separator */
-  line[0] = '+';
-  for (i = 1; i < width - 1; i++) line[i] = '-';
-  line[width - 1] = '+';
-  line[width] = 0;
-  m65_screen_puts(start_x, (unsigned char)(start_y + 2), line, THEME_PRI);
-
-  /* Empty middle rows */
-  for (i = 0; i < inner_w; i++) line[i] = ' ';
-  line[inner_w] = 0;
-  for (r = 3; r < height - 1; r++) {
-    m65_screen_putc(start_x, (unsigned char)(start_y + r), '|', THEME_PRI);
-    m65_screen_puts((unsigned char)(start_x + 1), (unsigned char)(start_y + r), line, THEME_TXT);
-    m65_screen_putc((unsigned char)(start_x + width - 1), (unsigned char)(start_y + r), '|', THEME_PRI);
-  }
-
-  /* Bottom border */
-  line[0] = '+';
-  for (i = 1; i < width - 1; i++) line[i] = '-';
-  line[width - 1] = '+';
-  line[width] = 0;
-  m65_screen_puts(start_x, (unsigned char)(start_y + height - 1), line, THEME_PRI);
+  unsigned char r;
+  box_row(start_x, start_y, width, 0, 0, 0);
+  box_row(start_x, (unsigned char)(start_y + 1), width, title, BOX_CENTER, THEME_SEC);
+  box_row(start_x, (unsigned char)(start_y + 2), width, 0, 0, 0);
+  for (r = 3; r < height - 1; r++) box_row(start_x, (unsigned char)(start_y + r), width, "", 0, THEME_TXT);
+  box_row(start_x, (unsigned char)(start_y + height - 1), width, 0, 0, 0);
 }
 
 /* A typed name has no directory entry to hand: measure the file, so the
@@ -938,7 +818,6 @@ unsigned char ui_file_picker(unsigned char drive, char *out_filename, unsigned l
   unsigned char top_index = 0;
   char title_buf[48];
   char line[64];
-  unsigned char i;
 
   picker_count = 0;
 
@@ -974,28 +853,10 @@ unsigned char ui_file_picker(unsigned char drive, char *out_filename, unsigned l
   title_buf[19] = (char)('8' + drive);
   format_picker_box(start_x, start_y, width, height, title_buf);
 
-  /* Footer instructions on row height - 2 */
-  {
-    const char *foot = "[CR] Send  [M] Manual  [F1] Cancel";
-    unsigned char flen = (unsigned char)strlen(foot);
-    unsigned char fpad = (inner_w > flen) ? (unsigned char)((inner_w - flen) / 2) : 0;
-    for (i = 0; i < inner_w; i++) line[i] = ' ';
-    memcpy(line + fpad, foot, flen);
-    line[inner_w] = 0;
-    m65_screen_putc(start_x, (unsigned char)(start_y + height - 2), '|', THEME_PRI);
-    m65_screen_puts((unsigned char)(start_x + 1), (unsigned char)(start_y + height - 2), line, THEME_SEC);
-    m65_screen_putc((unsigned char)(start_x + width - 1), (unsigned char)(start_y + height - 2), '|', THEME_PRI);
-  }
+  box_row(start_x, (unsigned char)(start_y + height - 2), width, "[CR] Send  [M] Manual  [F1] Cancel", BOX_CENTER, THEME_SEC);
 
   if (picker_count == 0) {
-    const char *no_files = "No files found on drive";
-    unsigned char nlen = (unsigned char)strlen(no_files);
-    for (i = 0; i < inner_w; i++) line[i] = ' ';
-    memcpy(line + 3, no_files, nlen);
-    line[inner_w] = 0;
-    m65_screen_putc(start_x, (unsigned char)(start_y + 4), '|', THEME_PRI);
-    m65_screen_puts((unsigned char)(start_x + 1), (unsigned char)(start_y + 4), line, 2);
-    m65_screen_putc((unsigned char)(start_x + width - 1), (unsigned char)(start_y + 4), '|', THEME_PRI);
+    box_row(start_x, (unsigned char)(start_y + 4), width, "No files found on drive", 3, 2);
 
     /* Allow manual typing fallback */
     out_filename[0] = 0;
@@ -1026,40 +887,22 @@ unsigned char ui_file_picker(unsigned char drive, char *out_filename, unsigned l
       line[inner_w] = 0;
 
       if (idx < picker_count) {
-        char blk_str[12];
-        unsigned int blk;
+        char blk_str[8];
         unsigned char nlen;
-        char *p = blk_str + sizeof(blk_str) - 1;
+        char *p;
         unsigned char plen;
 
         pk_read(idx);
-        blk = pk.blocks;
         nlen = (unsigned char)strlen(pk.name);
         line[1] = is_sel ? '>' : ' ';
-        line[2] = ' ';
         if (nlen > inner_w - 12) nlen = (unsigned char)(inner_w - 12);
         memcpy(line + 3, pk.name, nlen);
-
-        /* Format block count */
-        *p = 0;
-        if (blk == 0) *--p = '0';
-        else {
-          while (blk > 0) {
-            *--p = (char)('0' + (blk % 10));
-            blk /= 10;
-          }
-        }
+        p = fmt_uint(blk_str + 7, pk.blocks);
         plen = (unsigned char)strlen(p);
-        if (plen <= inner_w - 6) {
-          memcpy(line + inner_w - 6 - plen, p, plen);
-          memcpy(line + inner_w - 5, " blk ", 5);
-        }
-        line[inner_w] = 0;
+        memcpy(line + inner_w - 6 - plen, p, plen);
+        memcpy(line + inner_w - 5, " blk ", 5);
       }
-
-      m65_screen_putc(start_x, y, '|', THEME_PRI);
-      m65_screen_puts((unsigned char)(start_x + 1), y, line, col);
-      m65_screen_putc((unsigned char)(start_x + width - 1), y, '|', THEME_PRI);
+      box_row(start_x, y, width, line, 0, col);
     }
 
     k = ui_wait_key();

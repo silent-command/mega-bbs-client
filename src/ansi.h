@@ -8,6 +8,7 @@ void ansi_reset(void);
 void ansi_set_response_fn(ansi_response_fn fn);
 void ansi_putc(unsigned char c);
 void ansi_write(const unsigned char *buf, unsigned int len);
+void ansi_flush(void);      /* buffered text to the screen, cursor placed */
 void ansi_get_cursor(unsigned char *x, unsigned char *y);
 void ansi_set_cursor(unsigned char x, unsigned char y);
 

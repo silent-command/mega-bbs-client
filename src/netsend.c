@@ -8,6 +8,21 @@
  * apart from netutil.c so the host tests compile it against their mocks. */
 #include "netutil.h"
 
+/* done as a percentage of size, in 16-bit arithmetic: the 32-bit
+ * division library was 750 bytes for this one use. Sizes are scaled so
+ * the multiply by 100 fits; a D81 file is under 1.3 MB. */
+unsigned char transfer_percent(unsigned long done, unsigned long size)
+{
+  unsigned char sh = (size < 640UL) ? 0 : (size < 38400UL) ? 6 : 11;
+  unsigned int d, s, p;
+  if (size == 0) return 0;
+  if (done >= size) return 100;
+  d = (unsigned int)(done >> sh);
+  s = (unsigned int)(size >> sh);
+  p = (unsigned int)((d * 100u) / s);
+  return (unsigned char)(p > 100 ? 100 : p);
+}
+
 unsigned char net_send_all(const unsigned char *p, unsigned int n)
 {
   unsigned int idle = 0;

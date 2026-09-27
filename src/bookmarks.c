@@ -128,7 +128,7 @@ static void parse_line(char *line)
   p++;
 
   /* Field 5: Res */
-  if (*p >= '0' && *p <= '2') bm_win.res = (unsigned char)(*p - '0');
+  if (*p >= '0' && *p <= '3') bm_win.res = (unsigned char)(*p - '0');
 
   bookmarks_add(&bm_win);
 }
