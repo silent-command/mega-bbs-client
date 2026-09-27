@@ -394,9 +394,12 @@ static void draw_dir_screen(unsigned char selected, unsigned char top_index)
       row_str[pos++] = em_str[2]; row_str[pos++] = em_str[3];
       while (pos < 63) row_str[pos++] = ' ';
 
-      /* Resolution (5 chars) */
+      /* Resolution (5 chars), then the speed */
       s = rs_str;
       while (*s && pos < 68) row_str[pos++] = *s++;
+      while (pos < 70) row_str[pos++] = ' ';
+      s = ui_speed_name(bm->speed);
+      while (*s && pos < 75) row_str[pos++] = *s++;
       row_str[cols] = 0;
     } else {
       /* Selection indicator */
@@ -432,11 +435,11 @@ static void draw_dir_screen(unsigned char selected, unsigned char top_index)
       row_str[cols] = 0;
     }
 
-    /* The 80-column row is 68 characters wide: start it at column 6 so
+    /* The 80-column row is 74 characters wide: start it at column 3 so
      * the table sits in the middle, as the header and footer do. */
     if (cols >= 80) {
-      row_str[cols - 5] = 0;
-      m65_screen_puts(5, (unsigned char)(5 + i), row_str, color);
+      row_str[cols - 3] = 0;
+      m65_screen_puts(3, (unsigned char)(5 + i), row_str, color);
     } else {
       m65_screen_puts(0, (unsigned char)(5 + i), row_str, color);
     }
@@ -614,7 +617,20 @@ static __attribute__((noinline)) unsigned char edit_site(bookmark_t *bm, unsigne
   m65_screen_clear_row(row, ' ', 1);
   if (ui_read_line(row, "Res [1=40x25, 2=80x25, 3=80x50, 4=40 in 80]: ", opt_str, 2) && opt_str[0] >= '1' && opt_str[0] <= '4')
     bm->res = (unsigned char)(opt_str[0] - '1');
+
+  opt_str[0] = (char)('1' + bm->speed);
+  opt_str[1] = 0;
+  m65_screen_clear_row(row, ' ', 1);
+  if (ui_read_line(row, "Speed [1=300, 2=1200, 3=2400, 4=9600, 5=max]: ", opt_str, 2) && opt_str[0] >= '1' && opt_str[0] <= '5')
+    bm->speed = (unsigned char)(opt_str[0] - '1');
   return 1;
+}
+
+/* "300".."9600" or "max", for the directory and the speed message. */
+const char *ui_speed_name(unsigned char speed)
+{
+  static const char *const names[5] = { "300", "1200", "2400", "9600", "max" };
+  return names[speed > 4 ? 4 : speed];
 }
 
 unsigned char ui_dialing_directory(unsigned char boot_drive)
@@ -696,6 +712,7 @@ unsigned char ui_dialing_directory(unsigned char boot_drive)
       memset(&new_bm, 0, sizeof(new_bm));
       new_bm.port = 23;
       new_bm.res = menu_res;
+      new_bm.speed = SPEED_MAX;
       if (edit_site(&new_bm, prompt_row)) {
         bookmarks_add(&new_bm);
         save_or_warn(boot_drive, prompt_row);
@@ -723,6 +740,7 @@ unsigned char ui_dialing_directory(unsigned char boot_drive)
       static bookmark_t quick_bm;
       char p_str[8];
       memset(&quick_bm, 0, sizeof(quick_bm));
+      quick_bm.speed = SPEED_MAX;
       strcpy(p_str, "23");
 
       m65_screen_clear_row(prompt_row, ' ', 1);

@@ -19,6 +19,7 @@
 
 static unsigned char active_emul = EMUL_PETSCII;
 static unsigned char active_res = RES_80X25;
+static unsigned char active_speed = SPEED_MAX;
 static const char *active_bbs_name = "Connected";
 
 static void telnet_out_dispatch(unsigned char c)
@@ -45,23 +46,24 @@ static void xmodem_progress_display(const xmodem_status_t *st)
   ui_draw_xmodem_progress(st);
 }
 
-static __attribute__((noinline)) void hold_transfer_progress(void)
+static char transfer_fname[20];
+static unsigned long transfer_fsize;
+
+/* A line on the bottom row for a moment. */
+static __attribute__((noinline)) void show_briefly(const char *msg, unsigned char color, unsigned char frames)
 {
-#ifdef __MEGA65__
-  /* About 1.8 s, counted by net_poll, with a spin backstop for a stalled
-   * frame counter. */
+  unsigned char row = (unsigned char)(m65_screen_rows() - 1), cols = m65_screen_cols();
+  unsigned char len = (unsigned char)strlen(msg);
   unsigned int spins = 0;
   unsigned char wraps = 0;
+  m65_screen_clear_row(row, ' ', 1);
+  m65_screen_puts((unsigned char)((cols - len) / 2), row, msg, color);
   net_frames = 0;
-  while (net_frames < 90) {
+  while (net_frames < frames) {
     net_poll();
     if (++spins == 0 && ++wraps >= 20) break;
   }
-#endif
 }
-
-static char transfer_fname[20];
-static unsigned long transfer_fsize;
 
 /* One line on the bottom row saying how the transfer ended, held for a
  * moment; the codes are the same for both protocols. */
@@ -69,13 +71,35 @@ static __attribute__((noinline)) void report_transfer(unsigned char code)
 {
   static const char *const why[] = { "complete", "disk error", "bad data", "cancelled", "timed out" };
   char msg[40];
-  unsigned char row = (unsigned char)(m65_screen_rows() - 1), cols = m65_screen_cols(), len;
   strcpy(msg, "Transfer ");
   strcat(msg, why[code > 4 ? 4 : code]);
-  len = (unsigned char)strlen(msg);
-  m65_screen_clear_row(row, ' ', 1);
-  m65_screen_puts((unsigned char)((cols - len) / 2), row, msg, code ? 2 : 1);
-  hold_transfer_progress();
+  show_briefly(msg, code ? 2 : 1, 90);
+}
+
+/* The modem speed: characters that may be drawn per frame, in
+ * sixteenths, ten bits to a character (start and stop bits included) at
+ * 50 frames a second: 300 baud is 30 a second, 9600 is 960. */
+static const unsigned int speed_per_frame16[4] = { 10, 38, 77, 307 };
+static unsigned int meter_acc;
+static unsigned char meter_last_frame;
+
+/* Feeds up to `avail` bytes at the session's speed and returns how many
+ * were taken; everything at once when the speed is unlimited. */
+static __attribute__((noinline)) unsigned int meter_feed(const unsigned char *p, unsigned int avail)
+{
+  unsigned int k = avail;
+  if (active_speed < SPEED_MAX) {
+    unsigned char f = (unsigned char)PEEK(0xd7fa);
+    if (f != meter_last_frame) {
+      meter_last_frame = f;
+      meter_acc += speed_per_frame16[active_speed];
+    }
+    k = meter_acc >> 4;
+    if (k > avail) k = avail;
+    meter_acc -= k << 4;
+  }
+  if (k) telnet_feed(p, k);
+  return k;
 }
 
 static __attribute__((noinline)) void handle_zmodem_upload(void)
@@ -177,12 +201,13 @@ static __attribute__((noinline)) void run_terminal_session(bookmark_t *bm)
 #else
   static unsigned char rx_buf[RX_BUF_SIZE];
 #endif
-  unsigned int n;
+  unsigned int n = 0, pos = 0;     /* rx_buf holds n bytes, pos of them fed so far */
 
   active_bbs_name = bm->name;
   (void)active_bbs_name;
   active_emul = bm->emul;
   active_res = bm->res;
+  active_speed = bm->speed;
 
   /* Configure screen and emulation */
   apply_res();
@@ -205,15 +230,18 @@ static __attribute__((noinline)) void run_terminal_session(bookmark_t *bm)
 
     net_poll();
 
-    /* Receive incoming data from socket */
-    n = net_recv(rx_buf, RX_BUF_SIZE);
-    if (n > 0) {
-      telnet_feed(rx_buf, n);
+    /* Receive incoming data from socket, drawn at the session's speed */
+    if (pos >= n) { n = net_recv(rx_buf, RX_BUF_SIZE); pos = 0; }
+    if (pos < n) {
+      pos += meter_feed(rx_buf + pos, n - pos);
       term_flush();
 
-      /* Auto-detect ZModem download */
+      /* Auto-detect ZModem download: what was received but not yet drawn
+       * belongs to the transfer */
       if (telnet_check_zmodem()) {
         telnet_clear_zmodem();
+        if (pos < n) telnet_pushback(rx_buf + pos, n - pos);
+        pos = n;
         m65_screen_cursor_enable(0);
         report_transfer(zmodem_receive(work_drive));
         apply_res();
@@ -238,9 +266,18 @@ static __attribute__((noinline)) void run_terminal_session(bookmark_t *bm)
         /* Disconnect / return to Dialing Directory */
         break;
       } else if (IS_KEY_F5(k)) {
+        if (pos < n) telnet_feed(rx_buf + pos, n - pos);   /* the board's text, before the transfer takes the stream */
+        pos = n;
         m65_screen_cursor_enable(0);
         handle_terminal_transfer();
         m65_screen_cursor_enable(1);
+      } else if (IS_KEY_F3(k)) {
+        char msg[24];
+        active_speed = (unsigned char)((active_speed + 1) % 5);   /* 300, 1200, 2400, 9600, max */
+        strcpy(msg, "Speed: ");
+        strcat(msg, ui_speed_name(active_speed));
+        if (active_speed != SPEED_MAX) strcat(msg, " baud");
+        show_briefly(msg, 1, 40);
       } else if (IS_KEY_F7(k)) {
         work_drive ^= 1;                  /* shown in the transfer menu's title */
       } else {

@@ -41,6 +41,8 @@ unsigned char telnet_check_zmodem(void);
 void telnet_clear_zmodem(void);
 /* The stream has paused: bytes held back as a possible header go to the screen. */
 void telnet_idle(void);
+/* Bytes received but not yet fed, handed to a transfer that has started. */
+void telnet_pushback(const unsigned char *data, unsigned int len);
 
 /* The stream as a transfer sees it: telnet escaping undone on the way in,
  * applied on the way out. telnet_binary says whether both sides agreed to

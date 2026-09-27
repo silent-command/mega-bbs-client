@@ -13,8 +13,18 @@ typedef struct {
   char host[HOST_MAX];
   unsigned int port;
   unsigned char emul;       /* 0: EMUL_PETSCII, 1: EMUL_ANSI */
-  unsigned char res;        /* 0: RES_40X25, 1: RES_80X25, 2: RES_80X50 */
+  unsigned char res;        /* 0: RES_40X25, 1: RES_80X25, 2: RES_80X50, 3: RES_40IN80 */
+  unsigned char speed;      /* SPEED_300 .. SPEED_MAX: the modem speed the session is drawn at */
 } bookmark_t;
+
+#define SPEED_300  0
+#define SPEED_1200 1
+#define SPEED_2400 2
+#define SPEED_9600 3
+#define SPEED_MAX  4
+/* The file stores the baud rate itself, 0 for unlimited; anything else
+ * (an old file's drive field) reads as unlimited. */
+extern const unsigned int speed_baud[5];
 
 void bookmarks_init(unsigned char boot_drive);
 unsigned char bookmarks_count(void);

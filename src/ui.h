@@ -56,6 +56,9 @@ void ui_draw_xmodem_progress(const xmodem_status_t *st);
 /* Transfer selection modal: returns one of TRANSFER_ACT_* */
 unsigned char ui_transfer_menu(void);
 
+/* "300".."9600" or "max" */
+const char *ui_speed_name(unsigned char speed);
+
 /* Dialing Directory: returns index to connect, or 0xff on cancel/exit */
 unsigned char ui_dialing_directory(unsigned char boot_drive);
 

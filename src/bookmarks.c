@@ -16,6 +16,8 @@
 
 #define LINE_MAX 128
 
+const unsigned int speed_baud[5] = { 300, 1200, 2400, 9600, 0 };
+
 /* The table lives in bank 1 ($11800, 16 x 69 bytes), outside the CPU's
  * map; bm_win is the one near copy. bookmarks_get returns a pointer to
  * it, valid until the next bookmarks_ call. */
@@ -86,8 +88,9 @@ unsigned char bookmarks_delete(unsigned char index)
   return 1;
 }
 
-/* name|host|port|emul|res, the last two optional; anything after res (the
- * drive field of older files) is ignored. Parses into the window and
+/* name|host|port|emul|res|speed, the last three optional; the speed is
+ * a baud rate, 0 for unlimited, and anything else (older files kept a
+ * drive number there) reads as unlimited. Parses into the window and
  * appends it. */
 static void parse_line(char *line)
 {
@@ -96,6 +99,7 @@ static void parse_line(char *line)
   unsigned int port = 0;
 
   memset(&bm_win, 0, sizeof(bm_win));
+  bm_win.speed = SPEED_MAX;
 
   /* Field 1: Name */
   field = p;
@@ -130,6 +134,17 @@ static void parse_line(char *line)
 
   /* Field 5: Res */
   if (*p >= '0' && *p <= '3') bm_win.res = (unsigned char)(*p - '0');
+  while (*p && *p != '|') p++;
+  if (!*p) { bookmarks_add(&bm_win); return; }
+  p++;
+
+  /* Field 6: Speed, as a baud rate */
+  port = 0;
+  while (*p >= '0' && *p <= '9') { port = port * 10 + (unsigned int)(*p - '0'); p++; }
+  {
+    unsigned char i;
+    for (i = 0; i < 4; i++) if (port == speed_baud[i]) bm_win.speed = i;
+  }
 
   bookmarks_add(&bm_win);
 }
@@ -229,7 +244,8 @@ unsigned char bookmarks_save(unsigned char drive)
         !put_str(bm_win.host) || !put_str("|") ||
         !put_uint(bm_win.port) || !put_str("|") ||
         !put_uint(bm_win.emul) || !put_str("|") ||
-        !put_uint(bm_win.res) || !put_str("\n")) {
+        !put_uint(bm_win.res) || !put_str("|") ||
+        !put_uint(speed_baud[bm_win.speed > 4 ? 4 : bm_win.speed]) || !put_str("\n")) {
       cbmdos_close();
       return 0;
     }
@@ -243,9 +259,9 @@ unsigned char bookmarks_save(unsigned char drive)
     if (!f) return 0;
     for (i = 0; i < bm_count; i++) {
       bm_read(i, &bm_win);
-      fprintf(f, "%s|%s|%u|%u|%u\n",
+      fprintf(f, "%s|%s|%u|%u|%u|%u\n",
               bm_win.name, bm_win.host, bm_win.port,
-              bm_win.emul, bm_win.res);
+              bm_win.emul, bm_win.res, speed_baud[bm_win.speed > 4 ? 4 : bm_win.speed]);
     }
     fclose(f);
     return 1;

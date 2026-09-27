@@ -59,6 +59,11 @@ static void pushback(const unsigned char *data, unsigned int len)
     pushback_buf[pb_len++] = *data++;
 }
 
+void telnet_pushback(const unsigned char *data, unsigned int len)
+{
+  pushback(data, len);
+}
+
 /* Sliding detector for the sender's ZRQINIT, hex "**\x18B00" or binary
  * "*\x18A\0" / "*\x18C\0". Only ZRQINIT starts a download: a remote rz
  * answering an upload sends ZRINIT ("B01"), which used to match too. */

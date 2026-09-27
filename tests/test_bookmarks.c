@@ -22,6 +22,7 @@ int main(void)
   bm.port = 23;
   bm.emul = 1; /* ANSI */
   bm.res = 1;  /* 80x25 */
+  bm.speed = SPEED_1200;
   assert(bookmarks_add(&bm));
   assert(bookmarks_count() == 1);
 
@@ -32,6 +33,7 @@ int main(void)
   assert(p->port == 23);
   assert(p->emul == 1);
   assert(p->res == 1);
+  assert(p->speed == SPEED_1200);
 
   /* Update bookmark */
   strcpy(bm.name, "Renamed BBS");
@@ -75,6 +77,7 @@ int main(void)
       bm.port = (unsigned int)(1000 + i);
       bm.emul = i & 1;
       bm.res = i % 3;
+      bm.speed = i % 5;
           assert(bookmarks_add(&bm));
     }
     assert(!bookmarks_add(&bm));               /* full */
@@ -88,7 +91,7 @@ int main(void)
       snprintf(want, sizeof(want), "a-rather-long-host-name-%u.example.org", i);
       p = bookmarks_get(i);
       assert(p && strcmp(p->host, want) == 0);
-      assert(p->port == 1000 + i && p->emul == (i & 1) && p->res == i % 3);
+      assert(p->port == 1000 + i && p->emul == (i & 1) && p->res == i % 3 && p->speed == i % 5);
     }
     /* Deleting from the middle closes the gap; deleting the last is a
      * zero-length move. */
@@ -97,6 +100,19 @@ int main(void)
     assert(p && strcmp(p->name, "Site 6") == 0);
     assert(bookmarks_delete(bookmarks_count() - 1));
     assert(bookmarks_count() == BOOKMARK_MAX - 2);
+  }
+
+  /* Older files: five fields mean unlimited speed, and a sixth field
+   * that was a drive number (0 or 1) reads as unlimited too. */
+  {
+    FILE *f = fopen("bbscfg.txt", "w");
+    fputs("Old Five|five.example.org|23|0|1\nOld Drive|drive.example.org|23|1|2|1\nSlow|slow.example.org|23|0|0|300\n", f);
+    fclose(f);
+    while (bookmarks_count() > 0) bookmarks_delete(0);
+    assert(bookmarks_load(0) && bookmarks_count() == 3);
+    assert(bookmarks_get(0)->speed == SPEED_MAX);
+    assert(bookmarks_get(1)->speed == SPEED_MAX && bookmarks_get(1)->res == 2);
+    assert(bookmarks_get(2)->speed == SPEED_300);
   }
 
   printf("Bookmarks tests passed successfully!\n");
