@@ -19,7 +19,6 @@
 
 static unsigned char active_emul = EMUL_PETSCII;
 static unsigned char active_res = RES_80X25;
-static unsigned char active_drive = 0;
 static const char *active_bbs_name = "Connected";
 
 static void telnet_out_dispatch(unsigned char c)
@@ -66,16 +65,16 @@ static unsigned long transfer_fsize;
 
 static __attribute__((noinline)) void handle_zmodem_upload(void)
 {
-  if (ui_file_picker(active_drive, transfer_fname, &transfer_fsize) && transfer_fname[0]) {
-    zmodem_send(transfer_fname, active_drive, transfer_fsize);
+  if (ui_file_picker(work_drive, transfer_fname, &transfer_fsize) && transfer_fname[0]) {
+    zmodem_send(transfer_fname, work_drive, transfer_fsize);
     hold_transfer_progress();
   }
 }
 
 static __attribute__((noinline)) void handle_xmodem_upload(void)
 {
-  if (ui_file_picker(active_drive, transfer_fname, &transfer_fsize) && transfer_fname[0]) {
-    xmodem_send(transfer_fname, active_drive, transfer_fsize);
+  if (ui_file_picker(work_drive, transfer_fname, &transfer_fsize) && transfer_fname[0]) {
+    xmodem_send(transfer_fname, work_drive, transfer_fsize);
     hold_transfer_progress();
   }
 }
@@ -92,13 +91,13 @@ static __attribute__((noinline)) void handle_upload(unsigned char act)
 static __attribute__((noinline)) void handle_download(unsigned char act)
 {
   if (act == TRANSFER_ACT_Z_DOWN) {
-    zmodem_receive(active_drive);
+    zmodem_receive(work_drive);
     hold_transfer_progress();
   } else if (act == TRANSFER_ACT_X_DOWN) {
     unsigned char pr_row = (m65_screen_rows() > 25) ? 14 : 10;
     transfer_fname[0] = 0;
     if (ui_read_line(pr_row, "Save filename: ", transfer_fname, 16) && transfer_fname[0]) {
-      xmodem_receive(transfer_fname, active_drive);
+      xmodem_receive(transfer_fname, work_drive);
       hold_transfer_progress();
     }
   }
@@ -157,7 +156,6 @@ static __attribute__((noinline)) void run_terminal_session(bookmark_t *bm)
   (void)active_bbs_name;
   active_emul = bm->emul;
   active_res = bm->res;
-  active_drive = bm->drive;
 
   /* Configure screen and emulation */
   m65_screen_set_res(active_res);
@@ -185,7 +183,7 @@ static __attribute__((noinline)) void run_terminal_session(bookmark_t *bm)
       /* Auto-detect ZModem download */
       if (telnet_check_zmodem()) {
         telnet_clear_zmodem();
-        zmodem_receive(active_drive);
+        zmodem_receive(work_drive);
         hold_transfer_progress();
         /* Redraw terminal after transfer */
         m65_screen_set_res(active_res);
@@ -207,6 +205,8 @@ static __attribute__((noinline)) void run_terminal_session(bookmark_t *bm)
         break;
       } else if (IS_KEY_F5(k)) {
         handle_terminal_transfer();
+      } else if (IS_KEY_F7(k)) {
+        work_drive ^= 1;                  /* shown in the transfer menu's title */
       } else {
         send_terminal_key(k);
       }
@@ -255,6 +255,7 @@ int main(void)
   cbmdos_load("CP437", boot_drive, FONT_CP437_RAM, 2048);
 
   /* 5. Initialize Bookmarks */
+  work_drive = boot_drive;
   bookmarks_init(boot_drive);
 
   /* 6. Main application loop */

@@ -22,7 +22,6 @@ int main(void)
   bm.port = 23;
   bm.emul = 1; /* ANSI */
   bm.res = 1;  /* 80x25 */
-  bm.drive = 0;
   assert(bookmarks_add(&bm));
   assert(bookmarks_count() == 1);
 
@@ -52,7 +51,6 @@ int main(void)
   bm.port = 6400;
   bm.emul = 0;
   bm.res = 0;
-  bm.drive = 0;
   bookmarks_add(&bm);
   assert(bookmarks_save(0));
 
@@ -77,8 +75,7 @@ int main(void)
       bm.port = (unsigned int)(1000 + i);
       bm.emul = i & 1;
       bm.res = i % 3;
-      bm.drive = 0;
-      assert(bookmarks_add(&bm));
+          assert(bookmarks_add(&bm));
     }
     assert(!bookmarks_add(&bm));               /* full */
     assert(bookmarks_count() == BOOKMARK_MAX);

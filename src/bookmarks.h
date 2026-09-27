@@ -5,13 +5,15 @@
 #define NAME_MAX     24
 #define HOST_MAX     40
 
+/* A site. The drive transfers use is not part of a site any more: it is
+ * chosen with F7 and applies to every connection. Older config files with
+ * a sixth field still load; the field is ignored. */
 typedef struct {
   char name[NAME_MAX];
   char host[HOST_MAX];
   unsigned int port;
   unsigned char emul;       /* 0: EMUL_PETSCII, 1: EMUL_ANSI */
   unsigned char res;        /* 0: RES_40X25, 1: RES_80X25, 2: RES_80X50 */
-  unsigned char drive;      /* 0: Drive 8, 1: Drive 9 */
 } bookmark_t;
 
 void bookmarks_init(unsigned char boot_drive);

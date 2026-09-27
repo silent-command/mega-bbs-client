@@ -33,6 +33,14 @@ static const ui_theme_t ui_themes[6] = {
 };
 
 static unsigned char active_theme = 0; /* Default: Ice Blue & Silver */
+unsigned char work_drive = 0;
+
+/* Text centered on a row. */
+static void puts_centered(unsigned char row, const char *text, unsigned char color)
+{
+  unsigned char cols = m65_screen_cols(), len = (unsigned char)strlen(text);
+  m65_screen_puts((cols > len) ? (unsigned char)((cols - len) / 2) : 0, row, text, color);
+}
 
 #define THEME_PRI (ui_themes[active_theme].primary)
 #define THEME_SEC (ui_themes[active_theme].secondary)
@@ -63,7 +71,8 @@ unsigned char ui_read_line(unsigned char row, const char *prompt, char *out, uns
 {
   unsigned char len = (unsigned char)strlen(out);
   unsigned char cols = m65_screen_cols();
-  unsigned char start_col = (cols >= 80) ? 2 : 0;
+  unsigned char field = (unsigned char)(strlen(prompt) + maxlen + 1);   /* prompt, text, cursor */
+  unsigned char start_col = (cols > field) ? (unsigned char)((cols - field) / 2) : 0;
   unsigned char first_key = (len > 0) ? 1 : 0;
   char buf[82];
 
@@ -139,7 +148,7 @@ void ui_draw_status(const char *bbs_name, unsigned char emul, unsigned char res,
     line[n++] = 'D'; line[n++] = ':'; line[n++] = (char)('8' + drive);
     line[n++] = ' '; line[n++] = '|'; line[n++] = ' ';
 
-    p = "F1:Disconnect   F5:Transfer";
+    p = "F1:Disconnect  F5:Transfer  F7:Drive";
     while (*p && n < cols) line[n++] = *p++;
   } else {
     /* 40 column status line */
@@ -149,7 +158,7 @@ void ui_draw_status(const char *bbs_name, unsigned char emul, unsigned char res,
     p = res_str;
     while (*p && n < 10) line[n++] = *p++;
     line[n++] = ' ';
-    p = "F1:Disc  F5:Xfr";
+    p = "F1:Disc F5:Xfr F7:Drv";
     while (*p && n < cols) line[n++] = *p++;
   }
 
@@ -225,9 +234,11 @@ unsigned char ui_confirm_overwrite(const char *name)
 {
   unsigned char row = (m65_screen_rows() > 25) ? 23 : 13;
   unsigned char k, yes = 0;
+  unsigned char len = (unsigned char)(strlen(name) + 25), cols = m65_screen_cols();
+  unsigned char col = (cols > len) ? (unsigned char)((cols - len) / 2) : 0;
   m65_screen_clear_row(row, ' ', 1);
-  m65_screen_puts(2, row, name, 2);
-  m65_screen_puts((unsigned char)(2 + strlen(name)), row, " exists. Overwrite? [Y/N]", 2);
+  m65_screen_puts(col, row, name, 2);
+  m65_screen_puts((unsigned char)(col + strlen(name)), row, " exists. Overwrite? [Y/N]", 2);
   for (;;) {
     k = ui_wait_key();
     if (k == 'y' || k == 'Y') { yes = 1; break; }
@@ -259,8 +270,8 @@ unsigned char ui_transfer_menu(void)
   unsigned char start_y = (rows > 25) ? 18 : 7;
   char line[64];
   unsigned char i;
-  const char *title = "[ FILE TRANSFER ]";
-  unsigned char tlen = (unsigned char)strlen(title);
+  static char title[] = "[ FILE TRANSFER - DRIVE 8 ]";   /* the digit follows work_drive */
+  unsigned char tlen = (unsigned char)(sizeof(title) - 1);
   unsigned char tpad = (inner_w > tlen) ? (unsigned char)((inner_w - tlen) / 2) : 0;
 
   /* Top border */
@@ -269,14 +280,6 @@ unsigned char ui_transfer_menu(void)
   line[width - 1] = '+';
   line[width] = 0;
   m65_screen_puts(start_x, start_y, line, THEME_PRI);
-
-  /* Title row */
-  for (i = 0; i < inner_w; i++) line[i] = ' ';
-  memcpy(line + tpad, title, tlen);
-  line[inner_w] = 0;
-  m65_screen_putc(start_x, (unsigned char)(start_y + 1), '|', THEME_PRI);
-  m65_screen_puts((unsigned char)(start_x + 1), (unsigned char)(start_y + 1), line, THEME_PRI);
-  m65_screen_putc((unsigned char)(start_x + width - 1), (unsigned char)(start_y + 1), '|', THEME_PRI);
 
   /* Options */
   {
@@ -307,11 +310,23 @@ unsigned char ui_transfer_menu(void)
   m65_screen_puts(start_x, (unsigned char)(start_y + height - 1), line, THEME_PRI);
 
   for (;;) {
-    unsigned char k = ui_wait_key();
+    unsigned char k;
+
+    /* Title row, redrawn when F7 changes the drive */
+    title[24] = (char)('8' + work_drive);
+    for (i = 0; i < inner_w; i++) line[i] = ' ';
+    memcpy(line + tpad, title, tlen);
+    line[inner_w] = 0;
+    m65_screen_putc(start_x, (unsigned char)(start_y + 1), '|', THEME_PRI);
+    m65_screen_puts((unsigned char)(start_x + 1), (unsigned char)(start_y + 1), line, THEME_PRI);
+    m65_screen_putc((unsigned char)(start_x + width - 1), (unsigned char)(start_y + 1), '|', THEME_PRI);
+
+    k = ui_wait_key();
     if (k == '1') return TRANSFER_ACT_Z_UP;
     if (k == '2') return TRANSFER_ACT_Z_DOWN;
     if (k == '3') return TRANSFER_ACT_X_UP;
     if (k == '4') return TRANSFER_ACT_X_DOWN;
+    if (IS_KEY_F7(k)) { work_drive ^= 1; continue; }
     if (k == KEY_ESC || k == KEY_STOP || k == KEY_RETURN || IS_KEY_F1(k) || IS_KEY_F5(k)) {
       return TRANSFER_ACT_NONE;
     }
@@ -400,11 +415,6 @@ static void draw_dir_screen(unsigned char selected, unsigned char top_index)
       /* Resolution (5 chars) */
       s = rs_str;
       while (*s && pos < 68) row_str[pos++] = *s++;
-      while (pos < 71) row_str[pos++] = ' ';
-
-      /* Drive */
-      row_str[pos++] = 'D'; row_str[pos++] = ':';
-      row_str[pos++] = (char)('8' + bm->drive);
       row_str[cols] = 0;
     } else {
       /* Selection indicator */
@@ -437,14 +447,17 @@ static void draw_dir_screen(unsigned char selected, unsigned char top_index)
 
       s = rs_str;
       while (*s && pos < 32) row_str[pos++] = *s++;
-      while (pos < 33) row_str[pos++] = ' ';
-
-      row_str[pos++] = 'D'; row_str[pos++] = ':';
-      row_str[pos++] = (char)('8' + bm->drive);
       row_str[cols] = 0;
     }
 
-    m65_screen_puts(0, (unsigned char)(5 + i), row_str, color);
+    /* The 80-column row is 68 characters wide: start it at column 6 so
+     * the table sits in the middle, as the header and footer do. */
+    if (cols >= 80) {
+      row_str[cols - 5] = 0;
+      m65_screen_puts(5, (unsigned char)(5 + i), row_str, color);
+    } else {
+      m65_screen_puts(0, (unsigned char)(5 + i), row_str, color);
+    }
   }
 
   /* Scroll indicator if count > page_size */
@@ -474,7 +487,7 @@ static void draw_dir_screen(unsigned char selected, unsigned char top_index)
       tmp[p++] = ')'; tmp[p++] = ']'; tmp[p] = 0;
       strcat(s_info, tmp);
     }
-    m65_screen_puts(2, (unsigned char)(sep_row - 1), s_info, THEME_SEC);
+    puts_centered((unsigned char)(sep_row - 1), s_info, THEME_SEC);
   }
 
   /* Commands footer */
@@ -484,18 +497,16 @@ static void draw_dir_screen(unsigned char selected, unsigned char top_index)
 
   if (cols >= 80) {
     const char *f1_str = "[A] Add  [E] Edit  [D] Delete  [J] Jump  [Q] Quick-Dial  [T] Theme  [X] Exit";
-    const char *f2_str = "F1: Disconnect       F3: Text Mode       F5: Transfer";
-    unsigned char l1_pad = (cols > (unsigned char)strlen(f1_str)) ? (unsigned char)((cols - (unsigned char)strlen(f1_str)) / 2) : 0;
-    unsigned char l2_pad = (cols > (unsigned char)strlen(f2_str)) ? (unsigned char)((cols - (unsigned char)strlen(f2_str)) / 2) : 0;
-    m65_screen_puts(l1_pad, (unsigned char)(sep_row + 1), f1_str, THEME_SEC);
-    m65_screen_puts(l2_pad, (unsigned char)(sep_row + 2), f2_str, THEME_PRI);
+    static char f2_str[] = "F1: Disconnect     F3: Text Mode     F5: Transfer     F7: Drive 8";
+    f2_str[sizeof(f2_str) - 2] = (char)('8' + work_drive);
+    puts_centered((unsigned char)(sep_row + 1), f1_str, THEME_SEC);
+    puts_centered((unsigned char)(sep_row + 2), f2_str, THEME_PRI);
   } else {
-    m65_screen_puts(4, (unsigned char)(sep_row + 1),
-      "[A]Add  [E]Edit  [D]Del  [J]Jump", THEME_SEC);
-    m65_screen_puts(3, (unsigned char)(sep_row + 2),
-      "[Q]Quick-Dial  [T]Theme  [X]Exit", THEME_SEC);
-    m65_screen_puts(2, (unsigned char)(sep_row + 3),
-      "F1:Disconnect  [F3]Mode  F5:Transfer", THEME_PRI);
+    static char f3_str[] = "F1:Disc  F3:Mode  F5:Xfer  F7:Drv 8";
+    f3_str[sizeof(f3_str) - 2] = (char)('8' + work_drive);
+    puts_centered((unsigned char)(sep_row + 1), "[A]Add  [E]Edit  [D]Del  [J]Jump", THEME_SEC);
+    puts_centered((unsigned char)(sep_row + 2), "[Q]Quick-Dial  [T]Theme  [X]Exit", THEME_SEC);
+    puts_centered((unsigned char)(sep_row + 3), f3_str, THEME_PRI);
   }
 }
 
@@ -598,7 +609,7 @@ static void save_or_warn(unsigned char boot_drive, unsigned char row)
 {
   if (!bookmarks_save(boot_drive)) {
     m65_screen_clear_row(row, ' ', 1);
-    m65_screen_puts(2, row, "Could not write BBSCFG. Press any key.", 2);
+    puts_centered(row, "Could not write BBSCFG. Press any key.", 2);
     ui_wait_key();
   }
 }
@@ -716,16 +727,6 @@ unsigned char ui_dialing_directory(unsigned char boot_drive)
             else if (opt_str[0] == '3') new_bm.res = RES_80X50;
           }
 
-          /* Drive */
-          new_bm.drive = boot_drive;
-          opt_str[0] = (char)('8' + new_bm.drive);
-          opt_str[1] = 0;
-          m65_screen_clear_row(prompt_row, ' ', 1);
-          if (ui_read_line(prompt_row, "Drive [8 or 9]: ", opt_str, 2)) {
-            if (opt_str[0] == '8') new_bm.drive = 0;
-            else if (opt_str[0] == '9') new_bm.drive = 1;
-          }
-
           bookmarks_add(&new_bm);
           save_or_warn(boot_drive, prompt_row);
         }
@@ -785,15 +786,6 @@ unsigned char ui_dialing_directory(unsigned char boot_drive)
                 else if (opt_str[0] == '3') edit_bm.res = RES_80X50;
               }
 
-              /* Drive */
-              opt_str[0] = (char)('8' + edit_bm.drive);
-              opt_str[1] = 0;
-              m65_screen_clear_row(prompt_row, ' ', 1);
-              if (ui_read_line(prompt_row, "Drive [8 or 9]: ", opt_str, 2)) {
-                if (opt_str[0] == '8') edit_bm.drive = 0;
-                else if (opt_str[0] == '9') edit_bm.drive = 1;
-              }
-
               bookmarks_update(selected, &edit_bm);
               save_or_warn(boot_drive, prompt_row);
             }
@@ -827,10 +819,11 @@ unsigned char ui_dialing_directory(unsigned char boot_drive)
         quick_bm.name[NAME_MAX - 1] = 0;
         quick_bm.emul = EMUL_PETSCII;
         quick_bm.res = menu_res;
-        quick_bm.drive = boot_drive;
         bookmarks_add(&quick_bm);
         return (unsigned char)(bookmarks_count() - 1);
       }
+    } else if (IS_KEY_F7(k)) {
+      work_drive ^= 1;                            /* the drive transfers use */
     } else if (k == 't' || k == 'T') {
       /* Theme / Color demo */
       ui_color_demo();

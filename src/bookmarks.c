@@ -27,16 +27,15 @@ static bookmark_t bm_win;
 static unsigned char bm_count = 0;
 
 /* The starting table when there is no BBSCFG, in the file's own format
- * (name|host|port|emul|res|drive; emul 0 PETSCII 1 ANSI; res 0 40x25,
- * 1 80x25, 2 80x50) so one parser serves both. */
+ * (name|host|port|emul|res; emul 0 PETSCII 1 ANSI; res 0 40x25, 1 80x25,
+ * 2 80x50) so one parser serves both. */
 static const char defaults_txt[] =
-  "Particles BBS|particlesbbs.dyndns.org|6400|0|0|0\n"
-  "Borderline BBS|bbs.borderline.org|23|0|1|0\n"
-  "Heatwave BBS|heatwave.ddns.net|9640|0|0|0\n"
-  "Black Flag BBS|blackflag.acid.org|23|1|1|0\n"
-  "Synchronet BBS|vert.synchro.net|23|1|1|0\n"
-  "ConChaos BBS|conchaos.synchro.net|23|1|1|0\n"
-  "Test Server|192.168.1.232|6400|0|1|0\n";
+  "Particles BBS|particlesbbs.dyndns.org|6400|0|0\n"
+  "Borderline BBS|bbs.borderline.org|23|0|1\n"
+  "Heatwave BBS|heatwave.ddns.net|9640|0|0\n"
+  "Black Flag BBS|blackflag.acid.org|23|1|1\n"
+  "Synchronet BBS|vert.synchro.net|23|1|1\n"
+  "ConChaos BBS|conchaos.synchro.net|23|1|1\n";
 
 static __attribute__((noinline)) void bm_read(unsigned char i, bookmark_t *dst)
 {
@@ -86,8 +85,9 @@ unsigned char bookmarks_delete(unsigned char index)
   return 1;
 }
 
-/* name|host|port|emul|res|drive, the last three optional. Parses into the
- * window and appends it. */
+/* name|host|port|emul|res, the last two optional; anything after res (the
+ * drive field of older files) is ignored. Parses into the window and
+ * appends it. */
 static void parse_line(char *line)
 {
   char *p = line;
@@ -129,12 +129,6 @@ static void parse_line(char *line)
 
   /* Field 5: Res */
   if (*p >= '0' && *p <= '2') bm_win.res = (unsigned char)(*p - '0');
-  while (*p && *p != '|') p++;
-  if (!*p) { bookmarks_add(&bm_win); return; }
-  p++;
-
-  /* Field 6: Drive */
-  if (*p >= '0' && *p <= '1') bm_win.drive = (unsigned char)(*p - '0');
 
   bookmarks_add(&bm_win);
 }
@@ -234,8 +228,7 @@ unsigned char bookmarks_save(unsigned char drive)
         !put_str(bm_win.host) || !put_str("|") ||
         !put_uint(bm_win.port) || !put_str("|") ||
         !put_uint(bm_win.emul) || !put_str("|") ||
-        !put_uint(bm_win.res) || !put_str("|") ||
-        !put_uint(bm_win.drive) || !put_str("\n")) {
+        !put_uint(bm_win.res) || !put_str("\n")) {
       cbmdos_close();
       return 0;
     }
@@ -249,9 +242,9 @@ unsigned char bookmarks_save(unsigned char drive)
     if (!f) return 0;
     for (i = 0; i < bm_count; i++) {
       bm_read(i, &bm_win);
-      fprintf(f, "%s|%s|%u|%u|%u|%u\n",
+      fprintf(f, "%s|%s|%u|%u|%u\n",
               bm_win.name, bm_win.host, bm_win.port,
-              bm_win.emul, bm_win.res, bm_win.drive);
+              bm_win.emul, bm_win.res);
     }
     fclose(f);
     return 1;
