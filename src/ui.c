@@ -590,13 +590,15 @@ static __attribute__((noinline)) unsigned char edit_site(bookmark_t *bm, unsigne
   unsigned int pt = 0;
   char *p;
 
+  /* One prompt after another on the same row, each centered on its own
+   * width, so the row is cleared before every one. */
   p = fmt_uint(p_str + 7, bm->port);
   memmove(p_str, p, strlen(p) + 1);
   m65_screen_clear_row(row, ' ', 1);
-  m65_screen_clear_row((unsigned char)(row + 1), ' ', 1);
-  if (!ui_read_line(row, "Name: ", bm->name, NAME_MAX - 1) ||
-      !ui_read_line((unsigned char)(row + 1), "Host: ", bm->host, HOST_MAX - 1)) return 0;
-  m65_screen_clear_row((unsigned char)(row + 1), ' ', 1);
+  if (!ui_read_line(row, "Name: ", bm->name, NAME_MAX - 1)) return 0;
+  m65_screen_clear_row(row, ' ', 1);
+  if (!ui_read_line(row, "Host: ", bm->host, HOST_MAX - 1)) return 0;
+  m65_screen_clear_row(row, ' ', 1);
   if (!ui_read_line(row, "Port: ", p_str, 6)) return 0;
   for (p = p_str; *p >= '0' && *p <= '9'; p++) pt = pt * 10 + (unsigned int)(*p - '0');
   if (pt) bm->port = pt;
@@ -604,7 +606,7 @@ static __attribute__((noinline)) unsigned char edit_site(bookmark_t *bm, unsigne
   opt_str[0] = (char)('1' + bm->emul);
   opt_str[1] = 0;
   m65_screen_clear_row(row, ' ', 1);
-  if (ui_read_line(row, "Emul [1=PETSCII, 2=ANSI]: ", opt_str, 2) && opt_str[0] >= '1' && opt_str[0] <= '2')
+  if (ui_read_line(row, "Mode [1=PETSCII, 2=ANSI]: ", opt_str, 2) && opt_str[0] >= '1' && opt_str[0] <= '2')
     bm->emul = (unsigned char)(opt_str[0] - '1');
 
   opt_str[0] = (char)('1' + bm->res);
@@ -724,9 +726,8 @@ unsigned char ui_dialing_directory(unsigned char boot_drive)
       strcpy(p_str, "23");
 
       m65_screen_clear_row(prompt_row, ' ', 1);
-      m65_screen_clear_row((unsigned char)(prompt_row + 1), ' ', 1);
       if (ui_read_line(prompt_row, "Host/IP: ", quick_bm.host, HOST_MAX - 1) &&
-          ui_read_line((unsigned char)(prompt_row + 1), "Port (23): ", p_str, 6)) {
+          (m65_screen_clear_row(prompt_row, ' ', 1), ui_read_line(prompt_row, "Port (23): ", p_str, 6))) {
         unsigned int pt = 0;
         char *p = p_str;
         while (*p >= '0' && *p <= '9') pt = pt * 10 + (*p++ - '0');
