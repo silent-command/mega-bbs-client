@@ -29,10 +29,11 @@ static unsigned int tx_len;
 static unsigned int send_cap = 100;
 static unsigned long polls;
 
+static unsigned char peer_raw;                  /* a plain socket: no negotiation, no doubling */
 static void wire_put(unsigned char b) { assert(rx_tail < Q_SIZE); rx_q[rx_tail++] = b; }
 static void wire_out(const unsigned char *p, unsigned int n)
 {
-  while (n--) { if (*p == 0xff) wire_put(0xff); wire_put(*p++); }
+  while (n--) { if (*p == 0xff && !peer_raw) wire_put(0xff); wire_put(*p++); }
 }
 static void wire_str(const char *s) { wire_out((const unsigned char *)s, (unsigned int)strlen(s)); }
 
@@ -191,8 +192,10 @@ static void receiver_on_byte(unsigned char b)
 
 static void peer_feed(unsigned char b)
 {
-  if (peer.iac) { peer.iac = 0; if (b != 0xff) return; }      /* IAC IAC is one 0xFF */
-  else if (b == 0xff) { peer.iac = 1; return; }
+  if (!peer_raw) {
+    if (peer.iac) { peer.iac = 0; if (b != 0xff) return; }    /* IAC IAC is one 0xFF */
+    else if (b == 0xff) { peer.iac = 1; return; }
+  }
   if (peer.role) sender_on_byte(b); else receiver_on_byte(b);
 }
 
@@ -258,7 +261,19 @@ static void start(unsigned char role, unsigned int len, unsigned int blen)
   out_len = 0;
   file_open = 0;
   telnet_reset();
+  peer_raw = 0;
+  telnet_feed((const unsigned char *)"\xff\xfd\x03", 3);       /* IAC DO SGA at connect time: a telnet server */
   wire_str("Start your transfer now.\r\nWaiting...\r\n");   /* the board's prompt */
+}
+
+/* The same, from a board that is a plain socket. */
+static void start_raw(unsigned char role, unsigned int len, unsigned int blen)
+{
+  start(role, len, blen);
+  telnet_reset();
+  rx_head = rx_tail = 0;
+  peer_raw = 1;
+  wire_str("Start your transfer now.\r\n");
 }
 
 static unsigned int count_bytes(unsigned char b)
@@ -297,10 +312,19 @@ int main(void)
   ret = xmodem_receive("TEST.BIN", 0);
   assert(ret == XMODEM_OK);
   assert(out_len == 20480 && memcmp(out_file, file_data, 20480) == 0);
-  assert(peer.c_seen == 1 && peer.nak_seen == 2);   /* the first 'C' was answered; the NAKs were for the corrupt block and the stray EOT */
+  assert(peer.c_seen == 1 && peer.nak_seen == 3);   /* the first C was answered; the NAKs: corrupt block, stray EOT, first real EOT */
   assert(count_bytes(NAK) == 3);                /* corrupt block, stray EOT, first real EOT */
   assert(count_bytes(ACK) == 161);
   assert(xmodem_get_status()->blocks == 160 && xmodem_get_status()->percent == 100);
+
+  /* A raw board (no telnet at all): 0xFF bytes arrive as they are */
+  start_raw(1, 20480, 128);
+  ret = xmodem_receive("TEST.BIN", 0);
+  assert(ret == XMODEM_OK && out_len == 20480 && memcmp(out_file, file_data, 20480) == 0);
+  start_raw(0, 20480, 128);
+  wire_str("C");
+  ret = xmodem_send("TEST.BIN", 0, 20480);
+  assert(ret == XMODEM_OK && peer.recv_len == 20480 && memcmp(peer.recv, file_data, 20480) == 0);
 
   /* 1K blocks */
   start(1, 20480, 1024);

@@ -48,11 +48,13 @@ static void wire_put(unsigned char b)
   rx_q[rx_tail++] = b;
 }
 
-/* Everything the peer sends is doubled where a telnet server would. */
+/* Everything the peer sends is doubled where a telnet server would;
+ * a raw board doubles nothing. */
+static unsigned char peer_raw;
 static void wire_out(const unsigned char *p, unsigned int n)
 {
   while (n--) {
-    if (*p == 0xff) wire_put(0xff);
+    if (*p == 0xff && !peer_raw) wire_put(0xff);
     wire_put(*p++);
   }
 }
@@ -354,8 +356,10 @@ static void peer_feed_clean(unsigned char b)
 
 static void peer_feed(unsigned char b)
 {
-  if (pp.iac) { pp.iac = 0; if (b == 0xff) peer_feed_clean(0xff); return; }   /* a lone command is dropped */
-  if (b == 0xff) { pp.iac = 1; return; }
+  if (!peer_raw) {
+    if (pp.iac) { pp.iac = 0; if (b == 0xff) peer_feed_clean(0xff); return; }   /* a lone command is dropped */
+    if (b == 0xff) { pp.iac = 1; return; }
+  }
   peer_feed_clean(b);
 }
 
@@ -472,6 +476,8 @@ static void start(unsigned char role)
   exists_once = 0;
   deletes = 0;
   telnet_reset();
+  peer_raw = 0;
+  telnet_feed((const unsigned char *)"\xff\xfd\x03", 3);   /* IAC DO SGA at connect time: a telnet server */
 }
 
 static unsigned int count_bytes(unsigned char b)
@@ -500,6 +506,18 @@ int main(void)
   assert(!peer.got_oo && count_bytes('O') == 0);   /* only the sender says OO */
   assert(progress_calls > 10);
   assert(zmodem_get_status()->percent == 100 && !zmodem_get_status()->active);
+
+  /* A raw board, no telnet: nothing is doubled or collapsed */
+  start(1);
+  telnet_reset();
+  peer_raw = 1;
+  ret = zmodem_receive(0);
+  assert(ret == ZMODEM_OK && out_len == FILE_LEN && memcmp(out_file, file_data, FILE_LEN) == 0);
+  start(0);
+  telnet_reset();
+  peer_raw = 1;
+  ret = zmodem_send("TEST20K.BIN", 0, FILE_LEN);
+  assert(ret == ZMODEM_OK && peer.recv_len == FILE_LEN && memcmp(peer.recv, file_data, FILE_LEN) == 0);
 
   /* A corrupt third subpacket: one ZRPOS(2048), then a correct file */
   start(1);
