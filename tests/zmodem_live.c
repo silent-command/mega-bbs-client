@@ -5,7 +5,8 @@
  *   zmodem_live HOST PORT MODE FILE KEY PROMPT WAIT DONE [NAME]
  *
  * MODE is recv, send, xrecv or xsend; FILE the host file to write or
- * read; KEY what to type once PROMPT has been seen; WAIT the text that
+ * read; KEY what to type once PROMPT has been seen ('~' pauses four
+ * seconds); WAIT the text that
  * says the peer is ready ("" for recv: the sender's ZRQINIT is awaited
  * instead); DONE the text the peer prints afterwards; NAME the name sent
  * with an upload. Exit status 0 when the module reported success. The
@@ -29,9 +30,20 @@
 static int sock = -1;
 static int alive = 1;
 
+static int xlog;                              /* XLOG=1 in the environment: every byte on stderr */
+static void logbytes(const char *dir, const unsigned char *p, unsigned int n)
+{
+  unsigned int i;
+  if (!xlog) return;
+  fprintf(stderr, "%s", dir);
+  for (i = 0; i < n && i < 40; i++) fprintf(stderr, " %02x", p[i]);
+  fprintf(stderr, "%s\n", n > 40 ? " ..." : "");
+}
+
 unsigned int net_send(const unsigned char *p, unsigned int n)
 {
   ssize_t k = send(sock, p, n, 0);
+  logbytes("TX", p, n);
   if (k < 0) { if (errno == EAGAIN || errno == EWOULDBLOCK) return 0; alive = 0; return 0; }
   return (unsigned int)k;
 }
@@ -40,6 +52,7 @@ unsigned int net_recv(unsigned char *buf, unsigned int cap)
   ssize_t k = recv(sock, buf, cap, 0);
   if (k == 0) { alive = 0; return 0; }
   if (k < 0) { if (errno != EAGAIN && errno != EWOULDBLOCK) alive = 0; return 0; }
+  logbytes("RX", buf, (unsigned int)k);
   return (unsigned int)k;
 }
 void net_poll(void) { usleep(20000); }
@@ -116,12 +129,21 @@ int main(int argc, char **argv)
   if (connect(sock, res->ai_addr, res->ai_addrlen)) { perror("connect"); return 2; }
   fcntl(sock, F_SETFL, O_NONBLOCK);
 
+  xlog = getenv("XLOG") != 0;
   telnet_init(term_out, term_send);
   telnet_send_init_negotiation();
   zmodem_init(zprog);
   xmodem_init(xprog);
   if (!chat(prompt, 0)) { fprintf(stderr, "no prompt\n"); return 3; }
-  term_send((const unsigned char *)key, (unsigned int)strlen(key));
+  {
+    /* The keys, one at a time; a '~' in KEY is a four-second pause for a
+     * board that reads its input between screens. */
+    const char *k;
+    for (k = key; *k; k++) {
+      if (*k == '~') { int i; for (i = 0; i < 200; i++) { unsigned char buf[128]; unsigned int n = net_recv(buf, sizeof(buf)); if (n) telnet_feed(buf, n); else net_poll(); } }
+      else term_send((const unsigned char *)k, 1);
+    }
+  }
 
   if (!strcmp(mode, "recv")) {
     out_path = argv[4];

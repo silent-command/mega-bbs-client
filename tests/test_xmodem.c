@@ -55,6 +55,8 @@ static struct {
   unsigned int file_len;
   unsigned int blen;                            /* 128 or 1024 */
   unsigned char checksum;                       /* sender ignores 'C', wants NAK */
+  unsigned char late;                           /* busy at first: reads the queued polls after the fifth */
+  unsigned char polls;
   int corrupt_block;                            /* once */
   int stray_eot_after;                          /* a lone 0x04 after this block's ACK */
   int cancel_after;                             /* CAN CAN after this block's ACK */
@@ -105,6 +107,18 @@ static void peer_send_block(unsigned int idx)
 static void sender_on_byte(unsigned char b)
 {
   if (peer.silent) return;
+  if (peer.late && !peer.started) {
+    /* Like a board fetching the file: nothing is read until the fifth
+     * poll, then the queue is read in order and the first NAK starts a
+     * checksum transfer (the client is in 'C' mode again by then). */
+    if (b == 'C') peer.c_seen++;
+    if (b == NAK) peer.nak_seen++;
+    if (++peer.polls < 5) return;
+    peer.started = 1;
+    peer.next_block = 1;
+    peer_send_block(peer.next_block);
+    return;
+  }
   if (!peer.started) {
     if (b == 'C') peer.c_seen++;
     if (b == NAK) peer.nak_seen++;
@@ -304,18 +318,26 @@ int main(void)
   assert(xmodem_calc_crc16((const unsigned char *)"123456789", 9) == 0x31c3);
 
   /* Download, 128-byte CRC blocks: the prompt text does not spend the
-   * handshake, a corrupt block is NAKed once, a stray EOT does not end
-   * the file, the real EOT is confirmed. */
+   * handshake, a corrupt block is NAKed once, the EOT is acknowledged at
+   * once (a sender may take anything else as the end). */
   start(1, 20480, 128);
   peer.corrupt_block = 5;
-  peer.stray_eot_after = 7;
   ret = xmodem_receive("TEST.BIN", 0);
   assert(ret == XMODEM_OK);
   assert(out_len == 20480 && memcmp(out_file, file_data, 20480) == 0);
-  assert(peer.c_seen == 1 && peer.nak_seen == 3);   /* the first C was answered; the NAKs: corrupt block, stray EOT, first real EOT */
-  assert(count_bytes(NAK) == 3);                /* corrupt block, stray EOT, first real EOT */
+  assert(peer.c_seen == 1 && peer.nak_seen == 1);   /* the first C was answered; one NAK for the corrupt block */
+  assert(count_bytes(NAK) == 1);
   assert(count_bytes(ACK) == 161);
   assert(xmodem_get_status()->blocks == 160 && xmodem_get_status()->percent == 100);
+
+  /* A busy board: it reads our queued polls late and starts on a NAK in
+   * checksum mode while we are back in 'C' mode; the receiver adapts. */
+  start(1, 20480, 128);
+  peer.checksum = 1;
+  peer.late = 1;
+  ret = xmodem_receive("TEST.BIN", 0);
+  assert(ret == XMODEM_OK && out_len == 20480 && memcmp(out_file, file_data, 20480) == 0);
+  assert(peer.c_seen == 3 && peer.nak_seen == 2 && xmodem_get_status()->errors == 0);
 
   /* A raw board (no telnet at all): 0xFF bytes arrive as they are */
   start_raw(1, 20480, 128);

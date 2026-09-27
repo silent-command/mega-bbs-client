@@ -26,11 +26,17 @@ static unsigned char bin_rx = 0, bin_tx = 0; /* the peer's BINARY answers */
 
 /* Whether the peer speaks telnet at all. Many PETSCII boards are plain
  * sockets: they never negotiate, and to them 0xFF is a character and our
- * option requests are keystrokes. So a connection is raw until the peer
- * sends a real command (IAC followed by a command byte), and only then
- * is IAC escaped on the way out and undone on the way in, and only then
- * are our own options offered. */
+ * option requests are keystrokes. A telnet server negotiates before it
+ * says anything, so the decision is made once, on the first bytes of
+ * the connection: IAC followed by a command byte means telnet, anything
+ * else means raw for the whole session. (Deciding on any later IAC pair
+ * went wrong: PETSCII art has 0xFF, the pi glyph, next to bytes in the
+ * command range, and one such pair turned a raw board into "telnet" and
+ * ate two bytes of every file block with a 0xFF in it.) Only on a
+ * telnet link is IAC escaped on the way out and undone on the way in,
+ * and only then are our own options offered. */
 static unsigned char peer_telnet = 0;
+static unsigned char first_byte_seen = 0;
 static unsigned char want_negotiate = 0;
 static unsigned char naws_cols = 0, naws_rows = 0;   /* a NAWS to send once the peer is known to be telnet */
 
@@ -171,6 +177,7 @@ void telnet_reset(void)
   pb_pos = 0;
   held_n = 0;
   peer_telnet = 0;
+  first_byte_seen = 0;
   want_negotiate = 0;
   naws_cols = 0;
 }
@@ -290,8 +297,8 @@ void telnet_feed(const unsigned char *data, unsigned int len)
 
     switch (tstate) {
     case TSTATE_DATA:
-      if (c == TELNET_IAC && (peer_telnet || !in_transfer)) {
-        tstate = TSTATE_IAC;                      /* in a raw transfer 0xFF is data, no lookahead */
+      if (c == TELNET_IAC && (peer_telnet || !first_byte_seen)) {
+        tstate = TSTATE_IAC;                      /* on a raw link 0xFF is data */
       } else if (in_transfer) {
         cap_byte = c;
         cap_have = 1;
@@ -305,6 +312,7 @@ void telnet_feed(const unsigned char *data, unsigned int len)
         }
         out_or_hold(c);
       }
+      first_byte_seen = 1;
       break;
 
     case TSTATE_IAC:
@@ -316,6 +324,7 @@ void telnet_feed(const unsigned char *data, unsigned int len)
       } else if (c < TELNET_SE) {
         /* Not a command: a raw board's 0xFF followed by data. Both are data. */
         tstate = TSTATE_DATA;
+        first_byte_seen = 1;
         if (in_transfer) { cap_byte = 0xff; cap_have = 1; telnet_feed(&c, 1); }
         else { if (client_out) client_out(0xff); telnet_feed(&c, 1); }
       } else if (c == TELNET_DO) {

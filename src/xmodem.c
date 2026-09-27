@@ -35,6 +35,7 @@
 static xmodem_status_t cur_status;
 static xmodem_progress_fn progress_cb = 0;
 static unsigned char user_abort;
+static unsigned char unget_b, unget_have;       /* one byte read too far */
 
 #ifdef __MEGA65__
 #define file_buf ((unsigned char *)0x1400)
@@ -87,6 +88,7 @@ static unsigned char rx_byte(unsigned char *out, unsigned int timeout_frames)
   unsigned int spins = 0;
 #endif
 
+  if (unget_have) { unget_have = 0; *out = unget_b; return 1; }
   for (;;) {
     unsigned char k;
     if (telnet_rx_byte(out)) return 1;
@@ -135,6 +137,7 @@ static void begin(const char *filename, unsigned char drive, unsigned char is_up
   cur_status.is_upload = is_upload;
   cur_status.active = 1;
   user_abort = 0;
+  unget_have = 0;
   update_progress();
 }
 
@@ -180,7 +183,7 @@ unsigned char xmodem_receive(const char *filename, unsigned char drive)
   unsigned char use_crc = 1;
   unsigned char poll_char = POLL_C;
   unsigned char errors = 0, tries;
-  unsigned char b = 0, have = 0, eot_seen = 0, can_seen = 0;
+  unsigned char b = 0, have = 0, can_seen = 0;
 
   begin(filename, drive, 0);
 
@@ -224,16 +227,14 @@ unsigned char xmodem_receive(const char *filename, unsigned char drive)
     have = 0;
 
     if (b == EOT) {
-      /* NAK the first, ACK the second: a stray 0x04 cannot end the file. */
-      if (eot_seen) {
-        tx_byte(ACK);
-        if (cbmdos_close() != CBMDOS_OK) return finish(XMODEM_ERR_IO);
-        cur_status.percent = 100;
-        return finish(XMODEM_OK);
-      }
-      eot_seen = 1;
-      tx_byte(NAK);
-      continue;
+      /* Acknowledged at once. The classic "NAK the first EOT" guard
+       * against a stray 0x04 on a noisy line breaks senders that take
+       * anything but ACK as the end (Petscii BBS Builder does), and a TCP
+       * link has no stray bytes. */
+      tx_byte(ACK);
+      if (cbmdos_close() != CBMDOS_OK) return finish(XMODEM_ERR_IO);
+      cur_status.percent = 100;
+      return finish(XMODEM_OK);
     }
     if (b == CAN) {
       if (can_seen) { cbmdos_close(); user_abort = 0; return finish(XMODEM_ERR_ABORT); }
@@ -242,7 +243,6 @@ unsigned char xmodem_receive(const char *filename, unsigned char drive)
     }
     can_seen = 0;
     if (b != SOH && b != STX) continue;             /* noise between blocks */
-    eot_seen = 0;
 
     {
       unsigned int blen = (b == STX) ? 1024 : 128, i, crc = 0;
@@ -257,14 +257,25 @@ unsigned char xmodem_receive(const char *filename, unsigned char drive)
         crc = crc_step(crc, b);
         sum = (unsigned char)(sum + b);
       }
+      /* The check bytes, in the mode the sender is really using. A board
+       * that was busy when we polled reads our 'C's and NAKs from its
+       * queue later and may start in the other mode from the one we were
+       * in when its first block arrived; the block itself settles it. */
       if (ok) {
         unsigned char c1, c2;
-        if (use_crc) {
-          if (!rx_byte(&c1, TIMEOUT_FRAMES) || !rx_byte(&c2, TIMEOUT_FRAMES) ||
-              (((unsigned int)c1 << 8) | c2) != crc)
-            ok = 0;
-        } else if (!rx_byte(&c1, TIMEOUT_FRAMES) || c1 != sum) {
-          ok = 0;
+        if (!rx_byte(&c1, TIMEOUT_FRAMES)) ok = 0;
+        else if (use_crc) {
+          /* A checksum sender's block ends here and it waits for our ACK,
+           * so a second byte that fits the checksum is not waited for long. */
+          if (!rx_byte(&c2, (c1 == sum) ? 30 : TIMEOUT_FRAMES)) {
+            if (c1 == sum) use_crc = 0; else ok = 0;
+          } else if ((((unsigned int)c1 << 8) | c2) != crc) {
+            if (c1 == sum) { use_crc = 0; unget_b = c2; unget_have = 1; }   /* a checksum sender: c2 was the next byte */
+            else ok = 0;
+          }
+        } else if (c1 != sum) {
+          if (rx_byte(&c2, 30) && (((unsigned int)c1 << 8) | c2) == crc) use_crc = 1;   /* a CRC sender */
+          else ok = 0;
         }
       }
 

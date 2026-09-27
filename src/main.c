@@ -63,19 +63,32 @@ static __attribute__((noinline)) void hold_transfer_progress(void)
 static char transfer_fname[20];
 static unsigned long transfer_fsize;
 
+/* One line on the bottom row saying how the transfer ended, held for a
+ * moment; the codes are the same for both protocols. */
+static __attribute__((noinline)) void report_transfer(unsigned char code)
+{
+  static const char *const why[] = { "complete", "disk error", "bad data", "cancelled", "timed out" };
+  char msg[40];
+  unsigned char row = (unsigned char)(m65_screen_rows() - 1), cols = m65_screen_cols(), len;
+  strcpy(msg, "Transfer ");
+  strcat(msg, why[code > 4 ? 4 : code]);
+  len = (unsigned char)strlen(msg);
+  m65_screen_clear_row(row, ' ', 1);
+  m65_screen_puts((unsigned char)((cols - len) / 2), row, msg, code ? 2 : 1);
+  hold_transfer_progress();
+}
+
 static __attribute__((noinline)) void handle_zmodem_upload(void)
 {
   if (ui_file_picker(work_drive, transfer_fname, &transfer_fsize) && transfer_fname[0]) {
-    zmodem_send(transfer_fname, work_drive, transfer_fsize);
-    hold_transfer_progress();
+    report_transfer(zmodem_send(transfer_fname, work_drive, transfer_fsize));
   }
 }
 
 static __attribute__((noinline)) void handle_xmodem_upload(void)
 {
   if (ui_file_picker(work_drive, transfer_fname, &transfer_fsize) && transfer_fname[0]) {
-    xmodem_send(transfer_fname, work_drive, transfer_fsize);
-    hold_transfer_progress();
+    report_transfer(xmodem_send(transfer_fname, work_drive, transfer_fsize));
   }
 }
 
@@ -91,14 +104,12 @@ static __attribute__((noinline)) void handle_upload(unsigned char act)
 static __attribute__((noinline)) void handle_download(unsigned char act)
 {
   if (act == TRANSFER_ACT_Z_DOWN) {
-    zmodem_receive(work_drive);
-    hold_transfer_progress();
+    report_transfer(zmodem_receive(work_drive));
   } else if (act == TRANSFER_ACT_X_DOWN) {
     unsigned char pr_row = (m65_screen_rows() > 25) ? 14 : 10;
     transfer_fname[0] = 0;
     if (ui_read_line(pr_row, "Save filename: ", transfer_fname, 16) && transfer_fname[0]) {
-      xmodem_receive(transfer_fname, work_drive);
-      hold_transfer_progress();
+      report_transfer(xmodem_receive(transfer_fname, work_drive));
     }
   }
 }
@@ -204,8 +215,7 @@ static __attribute__((noinline)) void run_terminal_session(bookmark_t *bm)
       if (telnet_check_zmodem()) {
         telnet_clear_zmodem();
         m65_screen_cursor_enable(0);
-        zmodem_receive(work_drive);
-        hold_transfer_progress();
+        report_transfer(zmodem_receive(work_drive));
         apply_res();
         m65_screen_cursor_enable(1);
       }

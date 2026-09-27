@@ -69,34 +69,46 @@ int main(void)
     assert(last_out_char == 'S');
   }
 
-  /* A raw board: no command has come, so our options are held, 0xFF
-   * followed by data is two characters, and a transfer sees bytes as
-   * they are. A real command makes it telnet and releases the options. */
+  /* A raw board: its first bytes are not a telnet command, so the link
+   * is raw for good: our options are never sent, 0xFF followed by data
+   * is two characters (also later, when art happens to put pi next to a
+   * byte in the command range), and a transfer sees bytes as they are. */
   {
     unsigned char b, got[8], n = 0;
+    telnet_reset();
     tx_all_len = 0;
+    last_tx_len = 0;
     telnet_send_init_negotiation();
     telnet_send_naws(40, 25);
     assert(tx_all_len == 0 && last_tx_len == 0);             /* nothing sent yet */
     out_char_count = 0;
-    telnet_feed((const unsigned char *)"\xff\x41", 2);
-    assert(out_char_count == 2 && out_buf[0] == 0xff && out_buf[1] == 0x41);
+    telnet_feed((const unsigned char *)"\x93\xff\x41", 3);
+    assert(out_char_count == 3 && out_buf[1] == 0xff && out_buf[2] == 0x41);
     assert(!telnet_is_telnet());
+    telnet_feed((const unsigned char *)"\xff\xfd\x03", 3);              /* looks like IAC DO SGA, but the link is raw */
+    assert(!telnet_is_telnet() && out_char_count == 6 && last_tx_len == 0);
     queue((const unsigned char *)"\xff\xff\xfb\x01", 4);
     while (telnet_rx_byte(&b)) got[n++] = b;
     assert(n == 4 && got[0] == 0xff && got[1] == 0xff && got[2] == 0xfb);   /* raw: all four are data */
     tx_all_len = 0;
     assert(telnet_tx_data((const unsigned char *)"\xff", 1) && tx_all_len == 1);   /* and nothing is doubled */
-    telnet_feed((const unsigned char *)"\xff\xfd\x03", 3);              /* IAC DO SGA: a telnet server after all */
-    assert(telnet_is_telnet());
-    assert(last_tx_len == 3 && last_tx_buf[1] == TELNET_WILL);          /* the answer to DO SGA, after the held options and NAWS */
-    telnet_reset();
-    telnet_feed((const unsigned char *)"\xff\xfd\x03", 3);
   }
 
-  /* Test IAC DO BINARY negotiation */
+  /* A telnet server: it negotiates first, which releases the held options */
+  {
+    telnet_reset();
+    last_tx_len = 0;
+    telnet_send_init_negotiation();
+    telnet_send_naws(40, 25);
+    telnet_feed((const unsigned char *)"\xff\xfd\x03", 3);              /* IAC DO SGA as the first bytes */
+    assert(telnet_is_telnet());
+    assert(last_tx_len == 3 && last_tx_buf[1] == TELNET_WILL);          /* the answer to DO SGA, after the held options and NAWS */
+  }
+
+  /* Test IAC DO BINARY negotiation, on a fresh link whose first bytes it is */
   {
     const unsigned char do_bin[] = { TELNET_IAC, TELNET_DO, TELOPT_BINARY };
+    telnet_reset();
     last_tx_len = 0;
     telnet_feed(do_bin, 3);
     assert(last_tx_len == 3);
