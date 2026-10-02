@@ -292,22 +292,26 @@ static const char *res_name(unsigned char res)
   return names[res & 3];
 }
 
-/* One site's row: name, host and port, emulation, screen mode, speed. */
+/* One site's row: its number (the one J takes), name, host and port,
+ * emulation, screen mode, speed. */
 static __attribute__((noinline)) void draw_entry(unsigned char idx, unsigned char row, unsigned char rev)
 {
   bookmark_t *bm = bookmarks_get(idx);
   char num[8];
+  const char *nn;
   en = 0;
   if (!bm) { ui_row(row, 0, 0, 0); return; }
-  pad_to(1);
+  nn = fmt_uint(num + 7, (unsigned int)(idx + 1));
+  pad_to((unsigned char)(4 - strlen(nn)));                /* right-aligned in three columns, then a dot */
+  cat_to(nn, 4); cat_to(".", 5); pad_to(6);
   if (WIDE) {
-    cat_to(bm->name, 25); pad_to(26);
-    {                                     /* the host gets what the port leaves of columns 26-55 */
+    cat_to(bm->name, 30); pad_to(31);
+    {                                     /* the host gets what the port leaves of columns 31-60 */
       const char *pn = fmt_uint(num + 7, bm->port);
-      cat_to(bm->host, (unsigned char)(55 - strlen(pn))); cat_to(":", 56); cat_to(pn, 56); pad_to(57);
+      cat_to(bm->host, (unsigned char)(60 - strlen(pn))); cat_to(":", 61); cat_to(pn, 61); pad_to(62);
     }
-    cat_to(bm->emul == EMUL_ANSI ? "ANSI" : "PET", 61); pad_to(62);
-    cat_to(res_name(bm->res), 67); pad_to(68);
+    cat_to(bm->emul == EMUL_ANSI ? "ANSI" : "PET", 66); pad_to(67);
+    cat_to(res_name(bm->res), 72); pad_to(73);   /* the speed ends by column 76, clear of the edge */
   } else {
     cat_to(bm->name, 21); pad_to(22);
     cat_to(bm->emul == EMUL_ANSI ? "ANSI" : "PET", 26); pad_to(27);
@@ -348,8 +352,8 @@ static void draw_keys(void)
 
 static void notice(void)
 {
-  ui_status(WIDE ? "RUN/STOP quits   in a session: F1 disconnect  F3 transfer  F5 drive  F7 speed"
-                 : "J jump  MEGA-F/B color  RUN/STOP quits", 0);
+  ui_status(WIDE ? "RUN/STOP quits. In a session: F1 disconnect  F3 transfer  F5 drive  F7 speed"
+                 : "RUN/STOP quits. J jump, MEGA-F/B color", 0);
 }
 
 static __attribute__((noinline)) void draw_page(unsigned char selected, unsigned char top)
