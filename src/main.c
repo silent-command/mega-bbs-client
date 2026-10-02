@@ -211,6 +211,12 @@ static __attribute__((noinline)) void run_terminal_session(bookmark_t *bm)
 
   /* Configure screen and emulation */
   apply_res();
+  /* Black, whatever the menu's colors: boards draw assuming it, and the
+   * menu's color number means another color in the ANSI palette, which
+   * is how A-Net's screen came up in a color nobody chose (2026-10-02).
+   * The directory puts its own colors back on the way in. */
+  m65_screen_set_bg(0);
+  m65_screen_set_border(0);
   m65_screen_cls();
 
   ansi_reset();
@@ -260,6 +266,13 @@ static __attribute__((noinline)) void run_terminal_session(bookmark_t *bm)
 
     /* Read user input */
     k = ui_key();
+    if (k >= 0xc1 && k <= 0xda && (ui_last_mods & 0x08)) {
+      /* MEGA+F and MEGA+B are the menu's color keys and nothing here: sent,
+       * they were PETSCII graphics the board echoed (2026-10-02). Other
+       * MEGA chords go to the board as before. */
+      unsigned char l = (unsigned char)(k & 0x7f);
+      if (l == 'F' || l == 'B') k = 0;
+    }
     if (k) {
       /* Function keys handling */
       if (IS_KEY_F1(k)) {

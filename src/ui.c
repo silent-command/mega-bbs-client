@@ -23,10 +23,13 @@ unsigned char work_drive = 0;
 
 
 
-#define THEME_PRI ui_fg
-#define THEME_SEC ui_fg
-#define THEME_TXT ui_fg
-#define THEME_HI  ui_fg
+/* the in-session boxes sit on the session's black, where a black text
+ * color chosen against a brighter menu would vanish */
+#define SESSION_FG (ui_fg ? ui_fg : 1)
+#define THEME_PRI SESSION_FG
+#define THEME_SEC SESSION_FG
+#define THEME_TXT SESSION_FG
+#define THEME_HI  SESSION_FG
 
 /* The decimal digits of v, ending just before *end (which becomes the
  * NUL); returns where they start. */
