@@ -265,20 +265,20 @@ static __attribute__((noinline)) void run_terminal_session(bookmark_t *bm)
       if (IS_KEY_F1(k)) {
         /* Disconnect / return to Dialing Directory */
         break;
-      } else if (IS_KEY_F5(k)) {
+      } else if (IS_KEY_F3(k)) {
         if (pos < n) telnet_feed(rx_buf + pos, n - pos);   /* the board's text, before the transfer takes the stream */
         pos = n;
         m65_screen_cursor_enable(0);
         handle_terminal_transfer();
         m65_screen_cursor_enable(1);
-      } else if (IS_KEY_F3(k)) {
+      } else if (IS_KEY_F7(k)) {
         char msg[24];
         active_speed = (unsigned char)((active_speed + 1) % 5);   /* 300, 1200, 2400, 9600, max */
         strcpy(msg, "Speed: ");
         strcat(msg, ui_speed_name(active_speed));
         if (active_speed != SPEED_MAX) strcat(msg, " baud");
         show_briefly(msg, 1, 40);
-      } else if (IS_KEY_F7(k)) {
+      } else if (IS_KEY_F5(k)) {
         work_drive ^= 1;                  /* shown in the transfer menu's title */
       } else {
         send_terminal_key(k);
@@ -338,7 +338,7 @@ int main(void)
     bookmark_t *bm;
 
     if (sel == 0xff) continue;
-    bm = bookmarks_get(sel);
+    bm = (sel == UI_QUICK_DIAL) ? ui_quick_site() : bookmarks_get(sel);   /* a quick dial is not in the list (2026-10-02) */
     if (!bm) continue;
 
     m65_screen_cls();

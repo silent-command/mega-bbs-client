@@ -186,7 +186,7 @@ void ui_draw_status(const char *bbs_name, unsigned char emul, unsigned char res,
     line[n++] = 'D'; line[n++] = ':'; line[n++] = (char)('8' + drive);
     line[n++] = ' '; line[n++] = '|'; line[n++] = ' ';
 
-    p = "F1:Disconnect  F5:Transfer  F7:Drive";
+    p = "F1:Disconnect  F3:Transfer  F5:Drive  F7:Speed";
     while (*p && n < cols) line[n++] = *p++;
   } else {
     /* 40 column status line */
@@ -196,7 +196,7 @@ void ui_draw_status(const char *bbs_name, unsigned char emul, unsigned char res,
     p = res_str;
     while (*p && n < 10) line[n++] = *p++;
     line[n++] = ' ';
-    p = "F1:Disc F5:Xfr F7:Drv";
+    p = "F1:Disc F3:Xfr F5:Drv F7:Spd";
     while (*p && n < cols) line[n++] = *p++;
   }
 
@@ -308,8 +308,8 @@ unsigned char ui_transfer_menu(void)
     if (k == '2') return TRANSFER_ACT_Z_DOWN;
     if (k == '3') return TRANSFER_ACT_X_UP;
     if (k == '4') return TRANSFER_ACT_X_DOWN;
-    if (IS_KEY_F7(k)) { work_drive ^= 1; continue; }
-    if (k == KEY_ESC || k == KEY_STOP || k == KEY_RETURN || IS_KEY_F1(k) || IS_KEY_F5(k)) {
+    if (IS_KEY_F5(k)) { work_drive ^= 1; continue; }
+    if (k == KEY_ESC || k == KEY_STOP || k == KEY_RETURN || IS_KEY_F1(k) || IS_KEY_F3(k)) {
       return TRANSFER_ACT_NONE;
     }
   }
@@ -467,13 +467,17 @@ static void draw_dir_screen(unsigned char selected, unsigned char top_index)
 
   if (cols >= 80) {
     const char *f1_str = "[A] Add  [E] Edit  [D] Delete  [J] Jump  [Q] Quick-Dial  [T] Theme  [X] Exit";
-    static char f2_str[] = "F1: Disconnect     F3: Text Mode     F5: Transfer     F7: Drive 8";
-    f2_str[sizeof(f2_str) - 2] = (char)('8' + work_drive);
+    /* the session's keys, in order, no gap (2026-10-02): the text mode
+     * key is gone, since BASIC sets the mode and each site sets its own */
+#define F2_HEAD "F1: Disconnect     F3: Transfer     F5: Drive "
+    static char f2_str[] = F2_HEAD "8     F7: Speed";
+    f2_str[sizeof(F2_HEAD) - 1] = (char)('8' + work_drive);
     puts_centered((unsigned char)(sep_row + 1), f1_str, THEME_SEC);
     puts_centered((unsigned char)(sep_row + 2), f2_str, THEME_PRI);
   } else {
-    static char f3_str[] = "F1:Disc  F3:Mode  F5:Xfer  F7:Drv 8";
-    f3_str[sizeof(f3_str) - 2] = (char)('8' + work_drive);
+#define F3_HEAD "F1:Disc  F3:Xfer  F5:Drv "
+    static char f3_str[] = F3_HEAD "8  F7:Speed";
+    f3_str[sizeof(F3_HEAD) - 1] = (char)('8' + work_drive);
     puts_centered((unsigned char)(sep_row + 1), "[A]Add  [E]Edit  [D]Del  [J]Jump", THEME_SEC);
     puts_centered((unsigned char)(sep_row + 2), "[Q]Quick-Dial  [T]Theme  [X]Exit", THEME_SEC);
     puts_centered((unsigned char)(sep_row + 3), f3_str, THEME_PRI);
@@ -570,7 +574,13 @@ void ui_color_demo(void)
   }
 }
 
-static unsigned char menu_res = RES_80X25;
+/* The directory's screen mode: whatever the machine was in when the
+ * client started, as BASIC set it (0xff until then); each site's own
+ * mode applies in its session. The F3 key that cycled it is gone
+ * (2026-10-02). */
+static unsigned char menu_res = 0xff;
+static bookmark_t quick_bm;
+bookmark_t *ui_quick_site(void) { return &quick_bm; }
 
 
 /* Saves the table and, if the disk refused, says so: a failed save used to
@@ -639,7 +649,8 @@ unsigned char ui_dialing_directory(unsigned char boot_drive)
   unsigned char top_index = 0;
   unsigned char count;
 
-  /* Always restore Main Menu's configured resolution and PETSCII mode */
+  /* Always restore the directory's mode, and PETSCII */
+  if (menu_res == 0xff) menu_res = m65_screen_res();
   m65_screen_set_res(menu_res);
   m65_screen_set_emul(EMUL_PETSCII);
 
@@ -709,6 +720,12 @@ unsigned char ui_dialing_directory(unsigned char boot_drive)
       }
     } else if (k == 'a' || k == 'A') {
       bookmark_t new_bm;
+      if (count >= BOOKMARK_MAX) {                /* it used to ask every question, then drop the site silently */
+        m65_screen_clear_row(prompt_row, ' ', 1);
+        puts_centered(prompt_row, "The directory is full (16 sites). Press any key.", 2);
+        ui_wait_key();
+        continue;
+      }
       memset(&new_bm, 0, sizeof(new_bm));
       new_bm.port = 23;
       new_bm.res = menu_res;
@@ -736,39 +753,24 @@ unsigned char ui_dialing_directory(unsigned char boot_drive)
         if (selected > 0) selected--;
       }
     } else if (k == 'q' || k == 'Q' || IS_KEY_F2(k)) {
-      /* Quick connect: use hostname as default label */
-      static bookmark_t quick_bm;
-      char p_str[8];
+      /* Quick-Dial: the same prompts as Add, then dialed without joining
+       * the list. It used to be added to the list in memory, where the
+       * next Add, Edit or Delete wrote it to the disk (2026-10-02). */
       memset(&quick_bm, 0, sizeof(quick_bm));
+      quick_bm.port = 23;
+      quick_bm.res = menu_res;
       quick_bm.speed = SPEED_MAX;
-      strcpy(p_str, "23");
-
-      m65_screen_clear_row(prompt_row, ' ', 1);
-      if (ui_read_line(prompt_row, "Host/IP: ", quick_bm.host, HOST_MAX - 1) &&
-          (m65_screen_clear_row(prompt_row, ' ', 1), ui_read_line(prompt_row, "Port (23): ", p_str, 6))) {
-        unsigned int pt = 0;
-        char *p = p_str;
-        while (*p >= '0' && *p <= '9') pt = pt * 10 + (*p++ - '0');
-        quick_bm.port = pt ? pt : 23;
-        /* Default label to hostname */
-        strncpy(quick_bm.name, quick_bm.host, NAME_MAX - 1);
-        quick_bm.name[NAME_MAX - 1] = 0;
-        quick_bm.emul = EMUL_PETSCII;
-        quick_bm.res = menu_res;
-        bookmarks_add(&quick_bm);
-        return (unsigned char)(bookmarks_count() - 1);
+      if (edit_site(&quick_bm, prompt_row) && quick_bm.host[0]) {
+        if (!quick_bm.name[0]) { strncpy(quick_bm.name, quick_bm.host, NAME_MAX - 1); quick_bm.name[NAME_MAX - 1] = 0; }
+        return UI_QUICK_DIAL;
       }
-    } else if (IS_KEY_F7(k)) {
+    } else if (IS_KEY_F5(k)) {
       work_drive ^= 1;                            /* the drive transfers use */
     } else if (k == 't' || k == 'T') {
       /* Theme / Color demo */
       ui_color_demo();
       draw_dir_screen(selected, top_index);
       continue;
-    } else if (IS_KEY_F3(k)) {
-      /* F3 Text Mode toggle */
-      m65_screen_cycle_res();
-      menu_res = m65_screen_res();
     } else if (k == 'x' || k == 'X' || k == KEY_STOP) {
       /* Quit */
       m65_exit_to_basic();
@@ -941,7 +943,7 @@ unsigned char ui_file_picker(unsigned char drive, char *out_filename, unsigned l
         return 1;
       }
       return 0;
-    } else if (k == KEY_STOP || k == KEY_ESC || IS_KEY_F1(k) || IS_KEY_F5(k)) {
+    } else if (k == KEY_STOP || k == KEY_ESC || IS_KEY_F1(k) || IS_KEY_F3(k)) {
       return 0;
     }
   }

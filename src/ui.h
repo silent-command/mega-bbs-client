@@ -61,6 +61,10 @@ const char *ui_speed_name(unsigned char speed);
 
 /* Dialing Directory: returns index to connect, or 0xff on cancel/exit */
 unsigned char ui_dialing_directory(unsigned char boot_drive);
+/* ui_dialing_directory's answer for a Quick-Dial: the site is
+ * ui_quick_site(), which is never added to the saved list. */
+#define UI_QUICK_DIAL 0xfe
+bookmark_t *ui_quick_site(void);
 
 /* Interactive File Picker for Upload: returns 1 if file selected, 0 if cancelled */
 unsigned char ui_file_picker(unsigned char drive, char *out_filename, unsigned long *out_size);
