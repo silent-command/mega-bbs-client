@@ -62,8 +62,13 @@ static unsigned char cur_rows = 25;
 static unsigned char cur_border = 0;  /* Standard startup: Black */
 static unsigned char cur_bg = 0;      /* Standard startup: Black */
 static unsigned char cur_text = 1;    /* Standard startup: White */
-static unsigned char orig_border = 6; /* Pre-launch Commodore Blue */
-static unsigned char orig_bg = 6;     /* Pre-launch Commodore Blue */
+static unsigned char orig_border = 6; /* BASIC's, read at start-up */
+static unsigned char orig_bg = 6;
+/* BASIC's palette: $D030 bit 2 (palette RAM for colors 0-15) and the
+ * text palette bank in $D070 bits 5-4. BASIC 65 draws from RAM bank 3;
+ * PETSCII screens use the same, so a color number means what it means
+ * in BASIC (2026-10-02: blue came out yellow-green from the ROM palette). */
+static unsigned char orig_pal = 0x04, orig_bank = 3;
 
 static const unsigned char vga_r[16] = {
   0x00, 0x00, 0x00, 0x00, 0xaa, 0xaa, 0xaa, 0xaa,
@@ -196,9 +201,9 @@ void m65_screen_set_emul(unsigned char emul)
     m65_screen_set_palette_bank(1); /* 24-bit PC VGA palette */
     m65_font_set_ansi();            /* CP437 character generator */
   } else {
-    /* Disable Palette RAM for colors 0-15 -> use Commodore Palette ROM */
-    POKE(0xd030, (unsigned char)(PEEK(0xd030) & ~0x04));
-    m65_screen_set_palette_bank(0); /* Commodore palette */
+    /* BASIC's own palette, as it was when the client started */
+    POKE(0xd030, (unsigned char)((PEEK(0xd030) & ~0x04) | orig_pal));
+    m65_screen_set_palette_bank(orig_bank);
     m65_font_set_petscii(0);        /* ROM PETSCII character generator */
   }
 }
@@ -435,8 +440,8 @@ void m65_screen_init(void)
 
   orig_border = PEEK(0xd020) & 0x0f;
   orig_bg = PEEK(0xd021) & 0x0f;
-  if (orig_bg == 0) orig_bg = 6;       /* Default to Commodore Blue if black or unset */
-  if (orig_border == 0) orig_border = 6;
+  orig_pal = (unsigned char)(PEEK(0xd030) & 0x04);
+  orig_bank = (unsigned char)((PEEK(0xd070) >> 4) & 0x03);
 
   if (r_cols == 40) {
     cur_res = RES_40X25;
@@ -459,9 +464,10 @@ void m65_screen_init(void)
   /* Program 24-bit VGA palette into Palette Bank 1 */
   init_vga_palette();
 
-  /* Standard user requirement: startup border and background to BLACK (0), foreground to WHITE (1) */
-  cur_border = 0;
-  cur_bg = 0;
+  /* BASIC's border and background, and white text, as the other clients
+   * start (2026-10-02; until then this forced black) */
+  cur_border = orig_border;
+  cur_bg = orig_bg;
   cur_text = 1;
   m65_screen_set_border(cur_border);
   m65_screen_set_bg(cur_bg);

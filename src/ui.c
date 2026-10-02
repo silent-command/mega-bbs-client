@@ -420,7 +420,7 @@ static void save_or_warn(unsigned char boot_drive)
 
 /* The colors, MEGA-F and MEGA-B, as the other clients have them: the text
  * color skips the background's, and the background and border move
- * together (ftp's m65_screen.c), starting from black. */
+ * together, the first press going to black (ftp's m65_screen.c). */
 static void cycle_fg(void)
 {
   ui_fg = (unsigned char)((ui_fg + 1) & 15);
@@ -429,7 +429,10 @@ static void cycle_fg(void)
 
 static void cycle_bg(void)
 {
-  menu_bg = (unsigned char)((menu_bg + 1) & 15);  /* from black, where this client starts */
+  static unsigned char pressed;
+  if (!pressed && menu_bg != 0) menu_bg = 0;      /* the first press goes to black, as the other clients */
+  else menu_bg = (unsigned char)((menu_bg + 1) & 15);
+  pressed = 1;
   if (menu_bg == ui_fg) menu_bg = (unsigned char)((menu_bg + 1) & 15);
   menu_border = menu_bg;
   m65_screen_set_bg(menu_bg);
@@ -443,7 +446,8 @@ unsigned char ui_dialing_directory(unsigned char boot_drive)
 
   if (menu_res == 0xff) {
     menu_res = m65_screen_res();
-    menu_bg = menu_border = 0;            /* black on black with white text, the client's start (main.c) */
+    menu_bg = m65_screen_orig_bg();       /* BASIC's colors until MEGA-B, as the other clients */
+    menu_border = m65_screen_orig_border();
   }
   m65_screen_set_res(menu_res);
   m65_screen_set_emul(EMUL_PETSCII);

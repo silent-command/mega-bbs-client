@@ -313,7 +313,7 @@ int main(void)
   m65_own_vectors();
 #endif
 
-  /* 1. Standard color startup requirement: Border = 0 (Black), Background = 0 (Black), Text = 1 (White) */
+  /* 1. The screen, in BASIC's border and background with white text */
   m65_screen_init();
 
   /* 2. Initialize Telnet, ANSI, ZModem & XModem subsystems */

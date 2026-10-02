@@ -15,13 +15,25 @@ int main(void)
   mock_vic_regs[0xd07b & 0xffff] = 24;
   mock_vic_regs[0xd020 & 0xffff] = 6;
   mock_vic_regs[0xd021 & 0xffff] = 6;
+  mock_vic_regs[0xd030 & 0xffff] = 0x64;   /* BASIC 65: palette RAM for colors 0-15 */
+  mock_vic_regs[0xd070 & 0xffff] = 0xff;   /* and text palette bank 3 */
   m65_screen_init();
 
-  /* Test startup colors: border=black(0), bg=black(0) */
-  assert(m65_screen_border() == 0);
-  assert(m65_screen_bg() == 0);
+  /* Startup colors are BASIC's, as the other clients start (2026-10-02) */
+  assert(m65_screen_border() == 6);
+  assert(m65_screen_bg() == 6);
   assert(m65_screen_orig_border() == 6);
   assert(m65_screen_orig_bg() == 6);
+
+  /* A PETSCII screen keeps BASIC's palette: RAM, bank 3 */
+  m65_screen_set_emul(EMUL_PETSCII);
+  assert(mock_vic_regs[0xd030 & 0xffff] & 0x04);
+  assert(((mock_vic_regs[0xd070 & 0xffff] >> 4) & 3) == 3);
+  /* an ANSI screen takes the PC palette in bank 1, and back again */
+  m65_screen_set_emul(EMUL_ANSI);
+  assert(((mock_vic_regs[0xd070 & 0xffff] >> 4) & 3) == 1);
+  m65_screen_set_emul(EMUL_PETSCII);
+  assert(((mock_vic_regs[0xd070 & 0xffff] >> 4) & 3) == 3);
 
   /* Test default resolution: 80x25 */
   assert(m65_screen_cols() == 80);
