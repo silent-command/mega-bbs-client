@@ -413,6 +413,15 @@ void m65_screen_puts(unsigned char x, unsigned char y, const char *s, unsigned c
   }
 }
 
+/* The same in reverse video: bit 7 of the screen code, which the ROM
+ * character set draws reversed. For the menus, which run in PETSCII. */
+void m65_screen_puts_rev(unsigned char x, unsigned char y, const char *s, unsigned char col)
+{
+  while (*s && x < cur_cols) {
+    m65_screen_putc(x++, y, (unsigned char)(ascii_to_screencode((unsigned char)*s++) | 0x80), col);
+  }
+}
+
 void m65_screen_init(void)
 {
   unsigned char r_d031, r_d07b;

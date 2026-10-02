@@ -9,9 +9,10 @@
  * Bank 1 in this client:
  *   $10000-$10F9F  screen RAM (80x50)
  *   $11000-$117FF  CP437 font copy
- *   $11800-$11C4F  stored sites, 16 x 69 bytes (bookmarks.c)
  *   $11C50-$11ECF  file picker listing, 32 x 20 bytes (ui.c)
  *   $12000-$123FF  transfer block buffer, 1 KB (zmodem.c, xmodem.c)
+ *   $12400-$159E7  stored sites, 200 x 69 bytes (bookmarks.c); 16 at
+ *                  $11800 until 2026-10-02, which was the whole cap
  *
  * A zero-length lcopy copies 64KB: every caller guards its length.
  *
@@ -30,7 +31,7 @@
 #define far_poke(far, v)        lpoke((far), (v))
 #else
 #include <string.h>
-static unsigned char far_mem[0x1000] __attribute__((unused));
+static unsigned char far_mem[0x4200] __attribute__((unused));   /* to the end of the site table */
 #define far_read(far, near, n)  memcpy((near), far_mem + ((far) - FAR_BASE), (n))
 #define far_write(near, far, n) memcpy(far_mem + ((far) - FAR_BASE), (near), (n))
 #define far_move(src, dst, n)   memmove(far_mem + ((dst) - FAR_BASE), far_mem + ((src) - FAR_BASE), (n))

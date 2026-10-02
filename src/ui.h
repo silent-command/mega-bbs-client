@@ -7,6 +7,7 @@
 #define KEY_RETURN 13
 #define KEY_DOWN   17
 #define KEY_HOME   19
+#define KEY_CLR    0x93           /* SHIFT + HOME: the last site */
 #define KEY_DEL    20
 #define KEY_ESC    27
 #define KEY_RIGHT  29
@@ -39,15 +40,22 @@
 #define TRANSFER_ACT_X_UP     3
 #define TRANSFER_ACT_X_DOWN   4
 
-/* The drive transfers read and write, 0 for 8 and 1 for 9; F7 toggles it
+#define BBS_VERSION "1.1"
+
+/* The drive transfers read and write, 0 for 8 and 1 for 9; F5 toggles it
  * in the directory and in a session. */
 extern unsigned char work_drive;
+/* The menus' text color (MEGA-F cycles it) and $D611 as the last key was read. */
+extern unsigned char ui_fg, ui_last_mods;
+/* A row of a and b, padded to the full width, reversed when rev; the
+ * status row, two above the bottom, as the other clients have it. */
+void ui_row(unsigned char row, const char *a, const char *b, unsigned char rev);
+void ui_status(const char *a, const char *b);
 
 unsigned char ui_key(void);
 unsigned char ui_wait_key(void);
 unsigned char ui_read_line(unsigned char row, const char *prompt, char *out, unsigned char maxlen);
 
-void ui_draw_status(const char *bbs_name, unsigned char emul, unsigned char res, unsigned char drive);
 void ui_draw_zmodem_progress(const zmodem_status_t *st);
 /* Asks before a download replaces a file of the same name; 1 for yes. */
 unsigned char ui_confirm_overwrite(const char *name);
@@ -69,7 +77,5 @@ bookmark_t *ui_quick_site(void);
 /* Interactive File Picker for Upload: returns 1 if file selected, 0 if cancelled */
 unsigned char ui_file_picker(unsigned char drive, char *out_filename, unsigned long *out_size);
 
-/* Color Theme Demo & Selector */
-void ui_color_demo(void);
 
 #endif

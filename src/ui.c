@@ -15,38 +15,18 @@ static unsigned char mock_last_key = 0;
 #define POKE(addr, val) ((void)val)
 #endif
 
-typedef struct {
-  const char *name;
-  unsigned char primary;   /* Headers, borders, separator lines, F-keys */
-  unsigned char secondary; /* Shortcut keys, prompts, brackets */
-  unsigned char text;      /* Standard text / labels */
-  unsigned char highlight; /* Selected row, highlighted value */
-} ui_theme_t;
-
-static const ui_theme_t ui_themes[6] = {
-  { "Ice Blue & Silver",  14,  3, 1, 14 }, /* 1: Light Blue & Cyan (Default) */
-  { "Phosphor & Mint",    13,  5, 1, 13 }, /* 2: Light Green & Green */
-  { "Cyan & Cool White",   3, 14, 1,  3 }, /* 3: Cyan & Light Blue */
-  { "Electric Coral",     10,  2, 1, 10 }, /* 4: Light Red & Red */
-  { "Lavender & Violet",   4, 14, 1,  4 }, /* 5: Purple & Light Blue */
-  { "Monochrome Steel",   15, 12, 1,  1 }  /* 6: Light Grey & Med Grey */
-};
-
-static unsigned char active_theme = 0; /* Default: Ice Blue & Silver */
+/* The menus' text color, which MEGA-F cycles; the in-session boxes use it
+ * too. The six themes went with the family layout (2026-10-02). */
+unsigned char ui_fg = 1;
+unsigned char ui_last_mods;
 unsigned char work_drive = 0;
 
-/* Text centered on a row. */
-static void puts_centered(unsigned char row, const char *text, unsigned char color)
-{
-  unsigned char cols = m65_screen_cols(), len = (unsigned char)strlen(text);
-  m65_screen_puts((cols > len) ? (unsigned char)((cols - len) / 2) : 0, row, text, color);
-}
 
 
-#define THEME_PRI (ui_themes[active_theme].primary)
-#define THEME_SEC (ui_themes[active_theme].secondary)
-#define THEME_TXT (ui_themes[active_theme].text)
-#define THEME_HI  (ui_themes[active_theme].highlight)
+#define THEME_PRI ui_fg
+#define THEME_SEC ui_fg
+#define THEME_TXT ui_fg
+#define THEME_HI  ui_fg
 
 /* The decimal digits of v, ending just before *end (which becomes the
  * NUL); returns where they start. */
@@ -89,7 +69,7 @@ unsigned char ui_key(void)
 {
 #ifdef __MEGA65__
   unsigned char k = PEEK(0xd610);
-  if (k) POKE(0xd610, 0);
+  if (k) { ui_last_mods = PEEK(0xd611); POKE(0xd610, 0); }   /* the modifiers, then the pop */
   return k;
 #else
   return 0;
@@ -109,8 +89,7 @@ unsigned char ui_read_line(unsigned char row, const char *prompt, char *out, uns
 {
   unsigned char len = (unsigned char)strlen(out);
   unsigned char cols = m65_screen_cols();
-  unsigned char field = (unsigned char)(strlen(prompt) + maxlen + 1);   /* prompt, text, cursor */
-  unsigned char start_col = (cols > field) ? (unsigned char)((cols - field) / 2) : 0;
+  unsigned char start_col = 0;                    /* the left edge, as the other clients prompt */
   unsigned char first_key = (len > 0) ? 1 : 0;
   char buf[82];
 
@@ -126,7 +105,7 @@ unsigned char ui_read_line(unsigned char row, const char *prompt, char *out, uns
     while (n < cols - start_col) buf[n++] = ' ';
     buf[cols - start_col] = 0;
 
-    m65_screen_puts(start_col, row, buf, 1);
+    m65_screen_puts(start_col, row, buf, ui_fg);
 
     k = ui_wait_key();
     if (k == KEY_RETURN) return 1;
@@ -154,54 +133,6 @@ unsigned char ui_read_line(unsigned char row, const char *prompt, char *out, uns
       }
     }
   }
-}
-
-void ui_draw_status(const char *bbs_name, unsigned char emul, unsigned char res, unsigned char drive)
-{
-  char line[82];
-  unsigned char cols = m65_screen_cols();
-  unsigned char rows = m65_screen_rows();
-  const char *res_str = (res == RES_40X25) ? "40x25" : (res == RES_80X50) ? "80x50" : "80x25";
-  const char *emul_str = (emul == EMUL_ANSI) ? "ANSI" : "PET";
-  unsigned char n = 0;
-  const char *p;
-
-  /* Format: BBS_NAME | EMUL | RES | D:8 | F1:Dir F3:Mode F5:Res F7:Xfer */
-  memset(line, ' ', cols);
-  line[cols] = 0;
-
-  if (cols >= 80) {
-    p = bbs_name ? bbs_name : "Connected";
-    while (*p && n < 20) line[n++] = *p++;
-    line[n++] = ' '; line[n++] = '|'; line[n++] = ' ';
-
-    p = emul_str;
-    while (*p) line[n++] = *p++;
-    line[n++] = ' '; line[n++] = '|'; line[n++] = ' ';
-
-    p = res_str;
-    while (*p) line[n++] = *p++;
-    line[n++] = ' '; line[n++] = '|'; line[n++] = ' ';
-
-    line[n++] = 'D'; line[n++] = ':'; line[n++] = (char)('8' + drive);
-    line[n++] = ' '; line[n++] = '|'; line[n++] = ' ';
-
-    p = "F1:Disconnect  F3:Transfer  F5:Drive  F7:Speed";
-    while (*p && n < cols) line[n++] = *p++;
-  } else {
-    /* 40 column status line */
-    p = emul_str;
-    while (*p && n < 4) line[n++] = *p++;
-    line[n++] = ' ';
-    p = res_str;
-    while (*p && n < 10) line[n++] = *p++;
-    line[n++] = ' ';
-    p = "F1:Disc F3:Xfr F5:Drv F7:Spd";
-    while (*p && n < cols) line[n++] = *p++;
-  }
-
-  /* Draw on bottom row in secondary theme accent */
-  m65_screen_puts(0, (unsigned char)(rows - 1), line, THEME_SEC);
 }
 
 /* The transfer box: title, file, and a percentage bar, or a block count
@@ -315,325 +246,156 @@ unsigned char ui_transfer_menu(void)
   }
 }
 
-static void draw_dir_screen(unsigned char selected, unsigned char top_index)
-{
-  unsigned char i, count;
-  unsigned char cols = m65_screen_cols();
-  unsigned char rows = m65_screen_rows();
-  unsigned char page_size = (rows > 25) ? 35 : 14;
-  unsigned char sep_row = (rows > 25) ? 44 : 20;
-  unsigned char title_len = 37; /* "MEGA65 BBS CLIENT - DIALING DIRECTORY" */
-  unsigned char title_x = (cols > title_len) ? (unsigned char)((cols - title_len) / 2) : 0;
-  char bar[82];
+/* ---- the dialing directory, in the family's layout ------------------------
+ * The FTP, SFTP, SSH and gopher clients' shape (2026-10-02): the title on
+ * the top row, the sites below with the selection in reverse video, an
+ * info row, the status row for notices and prompts, and the keys on the
+ * last row. MEGA-F and MEGA-B cycle the text and background colors here,
+ * and only here: in a session every key belongs to the board. The six
+ * color themes, their screen and the boxed table are gone. */
 
-  m65_screen_cls();
-
-  /* Header */
-  memset(bar, '=', cols);
-  bar[cols] = 0;
-  m65_screen_puts(0, 1, bar, THEME_PRI);
-  m65_screen_puts(title_x, 2, "MEGA65 BBS CLIENT - DIALING DIRECTORY", 1);
-  m65_screen_puts(0, 3, bar, THEME_PRI);
-
-  count = bookmarks_count();
-  for (i = 0; i < page_size; i++) {
-    unsigned char idx = (unsigned char)(top_index + i);
-    bookmark_t *bm;
-    char row_str[82];
-    unsigned char color;
-    unsigned int num;
-    const char *em_str;
-    const char *rs_str;
-    unsigned char pos = 0;
-    const char *s;
-
-    if (idx >= count) break;
-    bm = bookmarks_get(idx);
-    if (!bm) break;
-
-    color = (idx == selected) ? THEME_HI : THEME_TXT;
-    num = (unsigned int)(idx + 1);
-    em_str = (bm->emul == EMUL_ANSI) ? "ANSI" : "PET ";
-    rs_str = (bm->res == RES_40X25) ? "40x25" : (bm->res == RES_80X50) ? "80x50" : (bm->res == RES_40IN80) ? "40/80" : "80x25";
-
-    memset(row_str, ' ', cols);
-    row_str[cols] = 0;
-
-    if (cols >= 80) {
-      pos = 1; /* 1 space margin on the left */
-
-      /* Selection indicator */
-      row_str[pos++] = (idx == selected) ? '>' : ' ';
-
-      /* Numeric entry indexing: right-aligned in 2 digits */
-      if (num < 10) {
-        row_str[pos++] = ' ';
-        row_str[pos++] = (char)('0' + num);
-      } else if (num < 100) {
-        row_str[pos++] = (char)('0' + (num / 10));
-        row_str[pos++] = (char)('0' + (num % 10));
-      } else {
-        row_str[pos++] = '9';
-        row_str[pos++] = '+';
-      }
-      row_str[pos++] = '.';
-      row_str[pos++] = ' ';
-
-      /* Name (up to 20 chars) */
-      s = bm->name;
-      while (*s && pos < 27) row_str[pos++] = *s++;
-      while (pos < 29) row_str[pos++] = ' ';
-
-      /* Host (up to 26 chars) */
-      s = bm->host;
-      while (*s && pos < 55) row_str[pos++] = *s++;
-      while (pos < 57) row_str[pos++] = ' ';
-
-      /* Emulation (4 chars) */
-      row_str[pos++] = em_str[0]; row_str[pos++] = em_str[1];
-      row_str[pos++] = em_str[2]; row_str[pos++] = em_str[3];
-      while (pos < 63) row_str[pos++] = ' ';
-
-      /* Resolution (5 chars), then the speed */
-      s = rs_str;
-      while (*s && pos < 68) row_str[pos++] = *s++;
-      while (pos < 70) row_str[pos++] = ' ';
-      s = ui_speed_name(bm->speed);
-      while (*s && pos < 75) row_str[pos++] = *s++;
-      row_str[cols] = 0;
-    } else {
-      /* Selection indicator */
-      row_str[pos++] = (idx == selected) ? '>' : ' ';
-
-      /* Numeric entry indexing: right-aligned in 2 digits */
-      if (num < 10) {
-        row_str[pos++] = (char)('0' + num);
-        row_str[pos++] = '.';
-        row_str[pos++] = ' ';
-      } else if (num < 100) {
-        row_str[pos++] = (char)('0' + (num / 10));
-        row_str[pos++] = (char)('0' + (num % 10));
-        row_str[pos++] = '.';
-        row_str[pos++] = ' ';
-      } else {
-        row_str[pos++] = '9';
-        row_str[pos++] = '+';
-        row_str[pos++] = '.';
-      }
-
-      /* 40 columns */
-      s = bm->name;
-      while (*s && pos < 21) row_str[pos++] = *s++;
-      while (pos < 22) row_str[pos++] = ' ';
-
-      row_str[pos++] = em_str[0]; row_str[pos++] = em_str[1];
-      row_str[pos++] = em_str[2]; row_str[pos++] = em_str[3];
-      row_str[pos++] = ' ';
-
-      s = rs_str;
-      while (*s && pos < 32) row_str[pos++] = *s++;
-      row_str[cols] = 0;
-    }
-
-    /* The 80-column row is 74 characters wide: start it at column 3 so
-     * the table sits in the middle, as the header and footer do. */
-    if (cols >= 80) {
-      row_str[cols - 3] = 0;
-      m65_screen_puts(3, (unsigned char)(5 + i), row_str, color);
-    } else {
-      m65_screen_puts(0, (unsigned char)(5 + i), row_str, color);
-    }
-  }
-
-  /* Scroll indicator if count > page_size */
-  if (count > page_size) {
-    char s_info[40], num[8];
-    unsigned char shown_to = (unsigned char)(top_index + page_size);
-    if (shown_to > count) shown_to = count;
-    strcpy(s_info, "[UP/DN: Scroll (");
-    strcat(s_info, fmt_uint(num + 7, (unsigned int)(top_index + 1)));
-    strcat(s_info, "-");
-    strcat(s_info, fmt_uint(num + 7, shown_to));
-    strcat(s_info, "/");
-    strcat(s_info, fmt_uint(num + 7, count));
-    strcat(s_info, ")]");
-    puts_centered((unsigned char)(sep_row - 1), s_info, THEME_SEC);
-  }
-
-  /* Commands footer */
-  memset(bar, '-', cols);
-  bar[cols] = 0;
-  m65_screen_puts(0, sep_row, bar, THEME_PRI);
-
-  if (cols >= 80) {
-    const char *f1_str = "[A] Add  [E] Edit  [D] Delete  [J] Jump  [Q] Quick-Dial  [T] Theme  [X] Exit";
-    /* the session's keys, in order, no gap (2026-10-02): the text mode
-     * key is gone, since BASIC sets the mode and each site sets its own */
-#define F2_HEAD "F1: Disconnect     F3: Transfer     F5: Drive "
-    static char f2_str[] = F2_HEAD "8     F7: Speed";
-    f2_str[sizeof(F2_HEAD) - 1] = (char)('8' + work_drive);
-    puts_centered((unsigned char)(sep_row + 1), f1_str, THEME_SEC);
-    puts_centered((unsigned char)(sep_row + 2), f2_str, THEME_PRI);
-  } else {
-#define F3_HEAD "F1:Disc  F3:Xfer  F5:Drv "
-    static char f3_str[] = F3_HEAD "8  F7:Speed";
-    f3_str[sizeof(F3_HEAD) - 1] = (char)('8' + work_drive);
-    puts_centered((unsigned char)(sep_row + 1), "[A]Add  [E]Edit  [D]Del  [J]Jump", THEME_SEC);
-    puts_centered((unsigned char)(sep_row + 2), "[Q]Quick-Dial  [T]Theme  [X]Exit", THEME_SEC);
-    puts_centered((unsigned char)(sep_row + 3), f3_str, THEME_PRI);
-  }
-}
-
-void ui_color_demo(void)
-{
-  unsigned char cols = m65_screen_cols();
-  unsigned char rows = m65_screen_rows();
-  unsigned char t;
-  unsigned char was = active_theme;                 /* restored if the choice is cancelled */
-  char bar[82];
-
-  for (;;) {
-    m65_screen_cls();
-    memset(bar, '=', cols);
-    bar[cols] = 0;
-
-    if (cols >= 80) {
-      const char *title = "COMPLEMENTARY COLOR SCHEME DEMO & SELECTOR";
-      unsigned char tx = (cols > (unsigned char)strlen(title)) ? (unsigned char)((cols - (unsigned char)strlen(title)) / 2) : 0;
-      m65_screen_puts(0, 1, bar, THEME_PRI);
-      m65_screen_puts(tx, 2, title, 1);
-      m65_screen_puts(0, 3, bar, THEME_PRI);
-
-      for (t = 0; t < 6; t++) {
-        unsigned char y = (unsigned char)(4 + t * 3);
-        char label[48];
-        const ui_theme_t *th = &ui_themes[t];
-
-        if (t == active_theme) {
-          strcpy(label, "[*] ");
-        } else {
-          label[0] = '[';
-          label[1] = (char)('1' + t);
-          label[2] = ']';
-          label[3] = ' ';
-          label[4] = 0;
-        }
-        strcat(label, th->name);
-        if (t == active_theme) strcat(label, " (ACTIVE)");
-
-        m65_screen_puts(2, y, label, th->primary);
-        m65_screen_puts(36, y, "---- Sample Header ----", th->primary);
-
-        m65_screen_puts(4, (unsigned char)(y + 1),
-          "[A] Add  [E] Edit  [D] Delete  [Q] Quick-Dial", th->secondary);
-        m65_screen_puts(53, (unsigned char)(y + 1),
-          "> 1. Sample BBS [Selected]", th->highlight);
-      }
-
-      memset(bar, '-', cols);
-      bar[cols] = 0;
-      m65_screen_puts(0, (unsigned char)(rows - 2), bar, THEME_PRI);
-      {
-        const char *hint = "Press [1-6] followed by [RETURN], [ESC] to cancel";
-        unsigned char hx = (cols > (unsigned char)strlen(hint)) ? (unsigned char)((cols - (unsigned char)strlen(hint)) / 2) : 0;
-        m65_screen_puts(hx, (unsigned char)(rows - 1), hint, 1);
-      }
-    } else {
-      /* 40 columns mode */
-      m65_screen_puts(0, 0, "==== COLOR SCHEMES ====", THEME_PRI);
-      for (t = 0; t < 6; t++) {
-        unsigned char y = (unsigned char)(2 + t * 3);
-        char label[32];
-        const ui_theme_t *th = &ui_themes[t];
-        label[0] = (t == active_theme) ? '*' : (char)('1' + t);
-        label[1] = '.';
-        label[2] = ' ';
-        label[3] = 0;
-        strcat(label, th->name);
-        if (t == active_theme) strcat(label, " *");
-
-        m65_screen_puts(1, y, label, th->primary);
-        m65_screen_puts(3, (unsigned char)(y + 1), "[A]Add  [E]Edit  [Q]Dial", th->secondary);
-        m65_screen_puts(3, (unsigned char)(y + 2), "> Sample BBS [Selected]", th->highlight);
-      }
-      m65_screen_puts(0, 23, "[1-6] then RETURN, ESC cancels", 1);
-    }
-
-    {
-      unsigned char k = ui_wait_key();
-      if (k >= '1' && k <= '6') {
-        active_theme = (unsigned char)(k - '1');
-        continue;
-      }
-      if (k == KEY_RETURN) break;
-      if (k == KEY_ESC || k == KEY_STOP) {
-        active_theme = was;
-        break;
-      }
-    }
-  }
-}
-
-/* The directory's screen mode: whatever the machine was in when the
- * client started, as BASIC set it (0xff until then); each site's own
- * mode applies in its session. The F3 key that cycled it is gone
- * (2026-10-02). */
-static unsigned char menu_res = 0xff;
+static unsigned char menu_res = 0xff;     /* BASIC's mode, taken at the first visit; each site has its own */
+static unsigned char menu_bg, menu_border;
 static bookmark_t quick_bm;
 bookmark_t *ui_quick_site(void) { return &quick_bm; }
 
+static char row_buf[82];                  /* a row being drawn */
+static char ent[82];                      /* an entry being built */
+static unsigned char en;
 
-/* Saves the table and, if the disk refused, says so: a failed save used to
- * return silently after twenty seconds of drive retries. */
-static void save_or_warn(unsigned char boot_drive, unsigned char row)
+#define ROW_FIRST 2
+#define ROW_INFO ((unsigned char)(m65_screen_rows() - 3))
+#define ROW_STATUS ((unsigned char)(m65_screen_rows() - 2))
+#define ROW_KEYS ((unsigned char)(m65_screen_rows() - 1))
+#define PAGE ((unsigned char)(m65_screen_rows() - 5))
+#define WIDE (m65_screen_cols() >= 80)
+
+void ui_row(unsigned char row, const char *a, const char *b, unsigned char rev)
 {
-  if (!bookmarks_save(boot_drive)) {
-    m65_screen_clear_row(row, ' ', 1);
-    puts_centered(row, "Could not write BBSCFG. Press any key.", 2);
-    ui_wait_key();
-  }
+  unsigned char cols = m65_screen_cols(), n = 0;
+  if (a) while (*a && n < cols) row_buf[n++] = *a++;
+  if (b) while (*b && n < cols) row_buf[n++] = *b++;
+  while (n < cols) row_buf[n++] = ' ';
+  row_buf[n] = 0;
+  if (rev) m65_screen_puts_rev(0, row, row_buf, ui_fg);
+  else m65_screen_puts(0, row, row_buf, ui_fg);
 }
-/* The prompts for a site's fields, prefilled from *bm; 1 when the name,
- * host and port were answered (emulation and resolution keep their values
- * when skipped). Shared by Add and Edit. */
-static __attribute__((noinline)) unsigned char edit_site(bookmark_t *bm, unsigned char row)
+
+void ui_status(const char *a, const char *b) { ui_row(ROW_STATUS, a, b, 0); }
+
+static __attribute__((noinline)) void cat_to(const char *s, unsigned char stop) { while (*s && en < stop) ent[en++] = *s++; }
+static __attribute__((noinline)) void pad_to(unsigned char col) { while (en < col) ent[en++] = ' '; }
+
+static const char *res_name(unsigned char res)
+{
+  static const char *const names[4] = { "40x25", "80x25", "80x50", "40/80" };
+  return names[res & 3];
+}
+
+/* One site's row: name, host and port, emulation, screen mode, speed. */
+static __attribute__((noinline)) void draw_entry(unsigned char idx, unsigned char row, unsigned char rev)
+{
+  bookmark_t *bm = bookmarks_get(idx);
+  char num[8];
+  en = 0;
+  if (!bm) { ui_row(row, 0, 0, 0); return; }
+  pad_to(1);
+  if (WIDE) {
+    cat_to(bm->name, 25); pad_to(26);
+    {                                     /* the host gets what the port leaves of columns 26-55 */
+      const char *pn = fmt_uint(num + 7, bm->port);
+      cat_to(bm->host, (unsigned char)(55 - strlen(pn))); cat_to(":", 56); cat_to(pn, 56); pad_to(57);
+    }
+    cat_to(bm->emul == EMUL_ANSI ? "ANSI" : "PET", 61); pad_to(62);
+    cat_to(res_name(bm->res), 67); pad_to(68);
+  } else {
+    cat_to(bm->name, 21); pad_to(22);
+    cat_to(bm->emul == EMUL_ANSI ? "ANSI" : "PET", 26); pad_to(27);
+    cat_to(res_name(bm->res), 32); pad_to(33);
+  }
+  cat_to(ui_speed_name(bm->speed), (unsigned char)(en + 4));
+  ent[en] = 0;
+  ui_row(row, ent, 0, rev);
+}
+
+static __attribute__((noinline)) void draw_info(unsigned char top)
+{
+  unsigned char count = bookmarks_count();
+  char num[8];
+  en = 0;
+  if (!count) cat_to("no sites yet: A adds one, Q dials one without saving it", 79);
+  else {
+    cat_to(fmt_uint(num + 7, count), 79);
+    cat_to(count == 1 ? " site" : " sites", 79);
+    if (count > PAGE) {
+      cat_to(WIDE ? "   page " : " p", 79);
+      cat_to(fmt_uint(num + 7, (unsigned int)(top / PAGE + 1)), 79);
+      cat_to(WIDE ? " of " : "/", 79);
+      cat_to(fmt_uint(num + 7, (unsigned int)((count + PAGE - 1) / PAGE)), 79);
+    }
+    cat_to(WIDE ? "   transfers on unit " : "  unit ", 79);
+    ent[en++] = (char)('8' + work_drive);
+  }
+  ent[en] = 0;
+  ui_row(ROW_INFO, ent, 0, 0);
+}
+
+static void draw_keys(void)
+{
+  ui_row(ROW_KEYS, WIDE ? "RETURN dial  A add  E edit  D delete  Q quick  J jump  MEGA-F/B color"
+                        : "RET dial A add E edit D del Q quick", 0, 0);
+}
+
+static void notice(void)
+{
+  ui_status(WIDE ? "RUN/STOP quits   in a session: F1 disconnect  F3 transfer  F5 drive  F7 speed"
+                 : "J jump  MEGA-F/B color  RUN/STOP quits", 0);
+}
+
+static __attribute__((noinline)) void draw_page(unsigned char selected, unsigned char top)
+{
+  unsigned char r, idx, count = bookmarks_count();
+  ui_row(0, "MEGA65 BBS Client - version " BBS_VERSION, 0, 0);
+  ui_row(1, 0, 0, 0);
+  for (r = 0; r < PAGE; r++) {
+    idx = (unsigned char)(top + r);
+    if (idx < count) draw_entry(idx, (unsigned char)(ROW_FIRST + r), (unsigned char)(idx == selected));
+    else ui_row((unsigned char)(ROW_FIRST + r), 0, 0, 0);
+  }
+  draw_info(top);
+  draw_keys();
+}
+
+/* The questions for a site, prefilled from *bm, on the status row with the
+ * choices for each on the info row; 1 when all were answered. RETURN keeps
+ * a value, RUN/STOP anywhere abandons the lot. Shared by Add, Edit and
+ * Quick-Dial. */
+static __attribute__((noinline)) unsigned char ask_choice(const char *what, const char *choices,
+                                                          unsigned char *val, unsigned char max)
+{
+  char opt[4];
+  opt[0] = (char)('1' + *val); opt[1] = 0;
+  ui_row(ROW_INFO, choices, 0, 0);
+  if (!ui_read_line(ROW_STATUS, what, opt, 1)) return 0;
+  if (opt[0] >= '1' && opt[0] < (char)('1' + max)) *val = (unsigned char)(opt[0] - '1');
+  return 1;
+}
+
+static __attribute__((noinline)) unsigned char edit_site(bookmark_t *bm, const char *what)
 {
   char p_str[8];
-  char opt_str[4];
   unsigned int pt = 0;
-  char *p;
-
-  /* One prompt after another on the same row, each centered on its own
-   * width, so the row is cleared before every one. */
-  p = fmt_uint(p_str + 7, bm->port);
+  char *p = fmt_uint(p_str + 7, bm->port);
   memmove(p_str, p, strlen(p) + 1);
-  m65_screen_clear_row(row, ' ', 1);
-  if (!ui_read_line(row, "Name: ", bm->name, NAME_MAX - 1)) return 0;
-  m65_screen_clear_row(row, ' ', 1);
-  if (!ui_read_line(row, "Host: ", bm->host, HOST_MAX - 1)) return 0;
-  m65_screen_clear_row(row, ' ', 1);
-  if (!ui_read_line(row, "Port: ", p_str, 6)) return 0;
+  ui_row(ROW_INFO, what, ": RETURN keeps what is shown, RUN/STOP cancels", 0);
+  if (!ui_read_line(ROW_STATUS, "Name: ", bm->name, NAME_MAX - 1)) return 0;
+  if (!ui_read_line(ROW_STATUS, "Host: ", bm->host, HOST_MAX - 1)) return 0;
+  if (!ui_read_line(ROW_STATUS, "Port: ", p_str, 5)) return 0;
   for (p = p_str; *p >= '0' && *p <= '9'; p++) pt = pt * 10 + (unsigned int)(*p - '0');
   if (pt) bm->port = pt;
-
-  opt_str[0] = (char)('1' + bm->emul);
-  opt_str[1] = 0;
-  m65_screen_clear_row(row, ' ', 1);
-  if (ui_read_line(row, "Mode [1=PETSCII, 2=ANSI]: ", opt_str, 2) && opt_str[0] >= '1' && opt_str[0] <= '2')
-    bm->emul = (unsigned char)(opt_str[0] - '1');
-
-  opt_str[0] = (char)('1' + bm->res);
-  opt_str[1] = 0;
-  m65_screen_clear_row(row, ' ', 1);
-  if (ui_read_line(row, "Res [1=40x25, 2=80x25, 3=80x50, 4=40 in 80]: ", opt_str, 2) && opt_str[0] >= '1' && opt_str[0] <= '4')
-    bm->res = (unsigned char)(opt_str[0] - '1');
-
-  opt_str[0] = (char)('1' + bm->speed);
-  opt_str[1] = 0;
-  m65_screen_clear_row(row, ' ', 1);
-  if (ui_read_line(row, "Speed [1=300, 2=1200, 3=2400, 4=9600, 5=max]: ", opt_str, 2) && opt_str[0] >= '1' && opt_str[0] <= '5')
-    bm->speed = (unsigned char)(opt_str[0] - '1');
-  return 1;
+  return ask_choice("Emulation: ", "1 PETSCII  2 ANSI", &bm->emul, 2) &&
+         ask_choice("Screen: ", "1 40x25  2 80x25  3 80x50  4 40 in 80", &bm->res, 4) &&
+         ask_choice("Speed: ", "1 300  2 1200  3 2400  4 9600  5 max", &bm->speed, 5);
 }
 
 /* "300".."9600" or "max", for the directory and the speed message. */
@@ -643,137 +405,147 @@ const char *ui_speed_name(unsigned char speed)
   return names[speed > 4 ? 4 : speed];
 }
 
+/* Saves the list and says so if the disk refused. */
+static void save_or_warn(unsigned char boot_drive)
+{
+  if (!bookmarks_save(boot_drive)) ui_status("could not write BBSCFG to the disk", 0);
+}
+
+/* The colors, MEGA-F and MEGA-B, as the other clients have them: the text
+ * color skips the background's, and the background and border move
+ * together (ftp's m65_screen.c), starting from black. */
+static void cycle_fg(void)
+{
+  ui_fg = (unsigned char)((ui_fg + 1) & 15);
+  if (ui_fg == menu_bg) ui_fg = (unsigned char)((ui_fg + 1) & 15);
+}
+
+static void cycle_bg(void)
+{
+  menu_bg = (unsigned char)((menu_bg + 1) & 15);  /* from black, where this client starts */
+  if (menu_bg == ui_fg) menu_bg = (unsigned char)((menu_bg + 1) & 15);
+  menu_border = menu_bg;
+  m65_screen_set_bg(menu_bg);
+  m65_screen_set_border(menu_border);
+}
+
 unsigned char ui_dialing_directory(unsigned char boot_drive)
 {
-  unsigned char selected = 0;
-  unsigned char top_index = 0;
-  unsigned char count;
+  static unsigned char selected, top;     /* kept, so a session returns to its site */
+  unsigned char k, mods, count, old;
 
-  /* Always restore the directory's mode, and PETSCII */
-  if (menu_res == 0xff) menu_res = m65_screen_res();
+  if (menu_res == 0xff) {
+    menu_res = m65_screen_res();
+    menu_bg = menu_border = 0;            /* black on black with white text, the client's start (main.c) */
+  }
   m65_screen_set_res(menu_res);
   m65_screen_set_emul(EMUL_PETSCII);
+  m65_screen_set_bg(menu_bg);
+  m65_screen_set_border(menu_border);
+  m65_screen_cls();
+
+  count = bookmarks_count();
+  if (selected >= count) selected = count ? (unsigned char)(count - 1) : 0;
+  top = (unsigned char)(selected - selected % PAGE);
+  draw_page(selected, top);
+  notice();
 
   for (;;) {
-    unsigned char k;
-    unsigned char page_size;
-    unsigned char rows = m65_screen_rows();
-    unsigned char sep_row = (rows > 25) ? 44 : 20;
-    unsigned char prompt_row = (unsigned char)(sep_row - 2);
-
-    page_size = (rows > 25) ? 35 : 14;
     count = bookmarks_count();
-
-    if (count > 0 && selected >= count) selected = (unsigned char)(count - 1);
-
-    /* Keep selected within visible viewport */
-    if (selected < top_index) {
-      top_index = selected;
-    } else if (selected >= top_index + page_size) {
-      top_index = (unsigned char)(selected - page_size + 1);
-    }
-
-    draw_dir_screen(selected, top_index);
-
     k = ui_wait_key();
-    if (k == KEY_RETURN) {
-      if (count > 0) return selected;
-    } else if (k == KEY_UP || k == 'w' || k == 'W') {
-      if (selected > 0) {
-        selected--;
-      } else if (count > 0) {
-        selected = (unsigned char)(count - 1);
-      }
-    } else if (k == KEY_DOWN || k == 's' || k == 'S') {
-      if (selected + 1 < count) {
-        selected++;
-      } else {
-        selected = 0;
-      }
-    } else if (k >= '1' && k <= '9') {
-      /* Direct selection 1..9 */
-      unsigned char idx = (unsigned char)(k - '1');
-      if (idx < count) {
-        selected = idx;
-        return selected;
-      }
-    } else if (k == '0') {
-      /* Direct selection 10 */
-      if (9 < count) {
-        selected = 9;
-        return selected;
-      }
-    } else if (k == 'j' || k == 'J') {
-      /* Jump shortcut [J] */
-      char j_str[8];
+    mods = ui_last_mods;
+    if (k >= 0xc1 && k <= 0xda && (mods & 0x08)) {          /* MEGA+letter: the capital with bit 7 set (ssh 5.29) */
+      k = (unsigned char)(k & 0x7f);
+      if (k == 'F') { cycle_fg(); draw_page(selected, top); notice(); }
+      else if (k == 'B') cycle_bg();
+      continue;
+    }
+    old = selected;
+    if (k == KEY_DOWN) { if (selected + 1 < count) selected++; }
+    else if (k == KEY_UP) { if (selected) selected--; }
+    else if (k == KEY_RIGHT) { if (top + PAGE < count) selected = (unsigned char)(top + PAGE); }
+    else if (k == KEY_LEFT) selected = (unsigned char)(top >= PAGE ? top - PAGE : 0);
+    else if (k == KEY_HOME) selected = 0;
+    else if (k == KEY_CLR) { if (count) selected = (unsigned char)(count - 1); }
+    else if (k == KEY_RETURN) { if (count) return selected; continue; }
+    else if (k == 'j' || k == 'J') {
+      char j_str[6];
+      unsigned int j = 0;
+      char *jp = j_str;
       j_str[0] = 0;
-      m65_screen_clear_row(prompt_row, ' ', 1);
-      m65_screen_clear_row((unsigned char)(prompt_row + 1), ' ', 1);
-      if (ui_read_line(prompt_row, "Jump to entry #: ", j_str, 5) && j_str[0]) {
-        unsigned int j_val = 0;
-        char *jp = j_str;
-        while (*jp >= '0' && *jp <= '9') j_val = j_val * 10 + (*jp++ - '0');
-        if (j_val >= 1 && j_val <= count) {
-          selected = (unsigned char)(j_val - 1);
-          return selected;
-        }
+      if (count && ui_read_line(ROW_STATUS, "Jump to site number: ", j_str, 3)) {
+        while (*jp >= '0' && *jp <= '9') j = j * 10 + (unsigned int)(*jp++ - '0');
+        if (j >= 1 && j <= count) selected = (unsigned char)(j - 1);
       }
+      notice();
     } else if (k == 'a' || k == 'A') {
       bookmark_t new_bm;
-      if (count >= BOOKMARK_MAX) {                /* it used to ask every question, then drop the site silently */
-        m65_screen_clear_row(prompt_row, ' ', 1);
-        puts_centered(prompt_row, "The directory is full (16 sites). Press any key.", 2);
-        ui_wait_key();
-        continue;
-      }
+      if (count >= BOOKMARK_MAX) { ui_status("the directory is full: D deletes a site", 0); continue; }
       memset(&new_bm, 0, sizeof(new_bm));
       new_bm.port = 23;
       new_bm.res = menu_res;
       new_bm.speed = SPEED_MAX;
-      if (edit_site(&new_bm, prompt_row)) {
+      if (edit_site(&new_bm, "A new site")) {
         bookmarks_add(&new_bm);
-        save_or_warn(boot_drive, prompt_row);
-      }
+        selected = (unsigned char)(count);
+        notice();
+        save_or_warn(boot_drive);
+      } else ui_status("cancelled", 0);
+      draw_info(top); draw_keys();
     } else if (k == 'e' || k == 'E') {
-      if (count > 0) {
-        bookmark_t *cur = bookmarks_get(selected);
-        if (cur) {
-          bookmark_t edit_bm = *cur;
-          if (edit_site(&edit_bm, prompt_row)) {
-            bookmarks_update(selected, &edit_bm);
-            save_or_warn(boot_drive, prompt_row);
-          }
-        }
+      bookmark_t *cur = count ? bookmarks_get(selected) : 0;
+      if (cur) {
+        bookmark_t edit_bm = *cur;
+        if (edit_site(&edit_bm, "Editing")) {
+          bookmarks_update(selected, &edit_bm);
+          notice();
+          save_or_warn(boot_drive);
+          draw_entry(selected, (unsigned char)(ROW_FIRST + selected - top), 1);
+        } else ui_status("cancelled", 0);
+        draw_info(top); draw_keys();
       }
     } else if (k == 'd' || k == 'D') {
-      /* Delete bookmark */
-      if (count > 0) {
-        bookmarks_delete(selected);
-        save_or_warn(boot_drive, prompt_row);
-        if (selected > 0) selected--;
+      bookmark_t *cur = count ? bookmarks_get(selected) : 0;
+      if (cur) {
+        ui_status("Delete ", cur->name);
+        ui_row(ROW_INFO, "Y deletes it, any other key keeps it", 0, 0);
+        k = ui_wait_key();
+        if (k == 'y' || k == 'Y') {
+          bookmarks_delete(selected);
+          if (selected && selected >= bookmarks_count()) selected--;
+          top = (unsigned char)(selected - selected % PAGE);
+          draw_page(selected, top);
+          notice();
+          save_or_warn(boot_drive);
+        } else { notice(); draw_info(top); }
       }
-    } else if (k == 'q' || k == 'Q' || IS_KEY_F2(k)) {
-      /* Quick-Dial: the same prompts as Add, then dialed without joining
-       * the list. It used to be added to the list in memory, where the
-       * next Add, Edit or Delete wrote it to the disk (2026-10-02). */
+      continue;
+    } else if (k == 'q' || k == 'Q') {
+      /* dialed without joining the list (2026-10-02) */
       memset(&quick_bm, 0, sizeof(quick_bm));
       quick_bm.port = 23;
       quick_bm.res = menu_res;
       quick_bm.speed = SPEED_MAX;
-      if (edit_site(&quick_bm, prompt_row) && quick_bm.host[0]) {
+      if (edit_site(&quick_bm, "Quick-Dial, not saved") && quick_bm.host[0]) {
         if (!quick_bm.name[0]) { strncpy(quick_bm.name, quick_bm.host, NAME_MAX - 1); quick_bm.name[NAME_MAX - 1] = 0; }
         return UI_QUICK_DIAL;
       }
+      ui_status("cancelled", 0);
+      draw_info(top); draw_keys();
     } else if (IS_KEY_F5(k)) {
-      work_drive ^= 1;                            /* the drive transfers use */
-    } else if (k == 't' || k == 'T') {
-      /* Theme / Color demo */
-      ui_color_demo();
-      draw_dir_screen(selected, top_index);
-      continue;
-    } else if (k == 'x' || k == 'X' || k == KEY_STOP) {
-      /* Quit */
+      work_drive ^= 1;
+      draw_info(top);
+    } else if (k == KEY_STOP || k == 'x' || k == 'X') {
       m65_exit_to_basic();
+    }
+    /* the selection moved, or the list changed under it */
+    if (selected < top || selected >= top + PAGE || k == 'a' || k == 'A') {
+      top = (unsigned char)(selected - selected % PAGE);
+      draw_page(selected, top);
+    } else if (selected != old) {
+      draw_entry(old, (unsigned char)(ROW_FIRST + old - top), 0);
+      draw_entry(selected, (unsigned char)(ROW_FIRST + selected - top), 1);
+      draw_info(top);
     }
   }
 }

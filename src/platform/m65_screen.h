@@ -44,6 +44,7 @@ void m65_screen_scroll_down(unsigned char top_row, unsigned char bot_row);
 void m65_screen_insert(unsigned char x, unsigned char y);   /* one blank cell at x, the rest of the row moves right */
 void m65_screen_putc(unsigned char x, unsigned char y, unsigned char ch, unsigned char col);
 void m65_screen_puts(unsigned char x, unsigned char y, const char *s, unsigned char col);
+void m65_screen_puts_rev(unsigned char x, unsigned char y, const char *s, unsigned char col);   /* reverse video, PETSCII mode */
 
 /* Text arrives one character at a time; putc_buf collects a run on one
  * row and flush writes it with two DMA copies instead of two far pokes

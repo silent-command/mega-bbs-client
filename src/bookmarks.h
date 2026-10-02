@@ -1,7 +1,7 @@
 #ifndef BOOKMARKS_H
 #define BOOKMARKS_H
 
-#define BOOKMARK_MAX 16
+#define BOOKMARK_MAX 200           /* in bank 1 at $12400 (m65_far.h); 0xfe and 0xff stay free as answers */
 #define NAME_MAX     24
 #define HOST_MAX     40
 

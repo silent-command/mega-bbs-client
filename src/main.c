@@ -309,23 +309,24 @@ int main(void)
   zmodem_init(zmodem_progress_display);
   xmodem_init(xmodem_progress_display);
 
-  m65_screen_puts(2, 2, "MEGA65 BBS CLIENT v1.0", 1);
-  m65_screen_puts(2, 4, "Bringing up network stack...", 1);
+  /* the family's start screen: the title on top, what is happening on
+   * the status row (2026-10-02) */
+  ui_row(0, "MEGA65 BBS Client - version " BBS_VERSION, 0, 0);
+  ui_status("starting the network...", 0);
 
   /* 3. Bring up mega-net & DHCP */
   if (!net_load(&err)) {
-    m65_screen_puts(2, 6, "Network load failed:", 2);
-    m65_screen_puts(2, 7, err ? err : "unknown", 2);
+    ui_status("network: ", err ? err : "unknown");
     for (;;) ;
   }
 
-  m65_screen_puts(2, 5, "Acquiring DHCP lease...", 1);
+  ui_status("waiting for a lease...", 0);
   if (!net_dhcp(&err)) {
-    m65_screen_puts(2, 6, "DHCP: Offline mode (no lease)", 1);
+    ui_status("no lease: offline", 0);
   }
 
   /* 4. Load CP437 font from disk into Bank 1 ($11000) */
-  m65_screen_puts(2, 6, "Loading CP437 font...", 1);
+  ui_status("loading the CP437 font...", 0);
   cbmdos_load("CP437", boot_drive, FONT_CP437_RAM, 2048);
 
   /* 5. Initialize Bookmarks */
@@ -341,24 +342,18 @@ int main(void)
     bm = (sel == UI_QUICK_DIAL) ? ui_quick_site() : bookmarks_get(sel);   /* a quick dial is not in the list (2026-10-02) */
     if (!bm) continue;
 
-    m65_screen_cls();
-    m65_screen_puts(2, 10, "Connecting to: ", 1);
-    m65_screen_puts(17, 10, bm->name, 1);
-    m65_screen_puts(2, 12, "Resolving host...", 3);
-
+    /* the directory stays on screen; the status row says how it goes */
+    ui_status("looking up ", bm->host);
     if (!net_resolve(bm->host, ip, &err)) {
-      m65_screen_puts(2, 14, "DNS Resolution Failed: ", 2);
-      m65_screen_puts(25, 14, err ? err : "unknown", 2);
-      m65_screen_puts(2, 16, "Press any key to return...", 1);
+      ui_status("look-up failed: ", err ? err : "unknown");
+      ui_row((unsigned char)(m65_screen_rows() - 1), "any key returns to the directory", 0, 0);
       ui_wait_key();
       continue;
     }
-
-    m65_screen_puts(2, 13, "Connecting to socket...", 3);
+    ui_status("connecting to ", bm->name);
     if (!net_connect(ip, bm->port, &err)) {
-      m65_screen_puts(2, 14, "Connection Failed: ", 2);
-      m65_screen_puts(21, 14, err ? err : "refused", 2);
-      m65_screen_puts(2, 16, "Press any key to return...", 1);
+      ui_status("could not connect: ", err ? err : "refused");
+      ui_row((unsigned char)(m65_screen_rows() - 1), "any key returns to the directory", 0, 0);
       ui_wait_key();
       continue;
     }

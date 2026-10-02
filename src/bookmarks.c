@@ -21,7 +21,7 @@ const unsigned int speed_baud[5] = { 300, 1200, 2400, 9600, 0 };
 /* The table lives in bank 1 ($11800, 16 x 69 bytes), outside the CPU's
  * map; bm_win is the one near copy. bookmarks_get returns a pointer to
  * it, valid until the next bookmarks_ call. */
-#define BMS_FAR FAR_BASE
+#define BMS_FAR (FAR_BASE + 0xC00UL)   /* $12400, past the transfer buffer: 200 x 69 bytes to $159E7 (2026-10-02) */
 /* Offsets are computed in 16 bits: a 32-bit multiply costs a library
  * call at every accessor. */
 #define BM_OFF(i) ((unsigned int)(i) * (unsigned int)sizeof(bookmark_t))
