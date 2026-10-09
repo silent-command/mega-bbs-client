@@ -5,7 +5,8 @@
     python3 build.py test       build and run the host test suite
     python3 build.py clean      clean build and bin directories
 
-Requires: llvm-mos (mos-mega65-clang), c1541 from VICE, and mega-net.
+Requires: llvm-mos (mos-mega65-clang), c1541 from VICE, and mega-net beside
+this repository (../mega-net) or at MEGANET.
 """
 import os, platform, re, shutil, subprocess, sys
 from pathlib import Path
@@ -14,7 +15,7 @@ ROOT = Path(__file__).resolve().parent
 BUILD = ROOT / "build"
 BIN = ROOT / "bin"
 IS_WINDOWS = platform.system() == "Windows"
-MEGANET = ROOT / "mega-net"
+MEGANET = Path(os.environ.get("MEGANET", ROOT.parent / "mega-net")).resolve()  # beside this repository, as every family client builds
 LIBC_A = BUILD / "libc" / "libmega65libc.a"
 
 
