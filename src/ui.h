@@ -40,7 +40,7 @@
 #define TRANSFER_ACT_X_UP     3
 #define TRANSFER_ACT_X_DOWN   4
 
-#define BBS_VERSION "1.3"
+#define BBS_VERSION "1.4"
 
 /* The drive transfers read and write, 0 for 8 and 1 for 9; F5 toggles it
  * in the directory and in a session. */
