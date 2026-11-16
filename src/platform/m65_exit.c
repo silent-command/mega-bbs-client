@@ -41,10 +41,32 @@ static const unsigned char stub[] = {
   0x5c, 0xea,                         /* map ; eom  -- no MAP anywhere */
   0xa9, 0x3f, 0x85, 0x01,             /* $01 = $3f   (as .fini) */
   0xa9, 0x64, 0x8d, 0x30, 0xd0,       /* $D030 = $64 (as .fini: ROM at $C000 and $E000) */
-  0xa9, 0x00, 0x8d, 0x70, 0xd0,       /* $D070 = 0: palette bank 0 (Commodore palette) */
   0xa9, 0x00, 0x8d, 0x6a, 0xd0,       /* $D06A = 0: the font's bank, after every other write */
   0x6c, 0xfc, 0xff                    /* jmp ($fffc): the KERNAL's reset entry */
 };
+
+/* Black between programs (the Net-Tools collection, mega-menu/README.md).
+ *
+ * The ROM's reset paints the screen and border colour 6 and reloads the
+ * palette, so every exit flashed blue until the collection's dispatcher
+ * ran and set black. The reset loads the palette into the bank $D070
+ * selects for writing and leaves $D070 alone (ROM 920413, read from the
+ * image and seen on the machine). So: colour 6 is made black here in
+ * bank 3, the one BASIC draws from ($D070 = $FF as the machine starts),
+ * and the ROM's writes are sent to bank 0. The dispatcher sets real
+ * black, then puts $D070 and the palette back. It has to be bank 3:
+ * shown from bank 0 the reset screen stayed blue (the BBS client, which
+ * left on bank 0), the ROM's palette setting drawing from 3 regardless.
+ *
+ * Only when the collection's handoff block is there, since without the
+ * dispatcher nothing would put them back. */
+static void black_until_dispatch(void)
+{
+  if (lpeek(0xff87ff0UL) != 77 || lpeek(0xff87ff1UL) != 78 || lpeek(0xff87ff2UL) != 67) return;
+  POKE(0xd070, 0xff);                                      /* show and write bank 3 */
+  POKE(0xd106, 0); POKE(0xd206, 0); POKE(0xd306, 0);
+  POKE(0xd070, 0x3f);                                      /* the ROM's writes: bank 0 */
+}
 
 void m65_exit_to_basic(void)
 {
@@ -87,6 +109,8 @@ void m65_exit_to_basic(void)
   POKE(0xd05d, (unsigned char)(PEEK(0xd05d) | 0x80));
   POKE(0xd068, 0x00); POKE(0xd069, 0xd8);          /* the ROM's lowercase set again, not the copy at $11000 (5.25) */
   POKE(0xd06a, 0x00);
+  POKE(0xd070, 0x00);                              /* palette bank 0 once more: this was the stub's, moved here so the collection's setting below outlasts it */
+  black_until_dispatch();
   memcpy((void *)STUB_AT, stub, sizeof stub);
   __asm__ volatile("jmp $1fb0");
   for (;;) ;                                       /* not reached */

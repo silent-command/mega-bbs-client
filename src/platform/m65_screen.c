@@ -438,8 +438,8 @@ void m65_screen_init(void)
   r_rows = (r_d07b == 49 || (r_d031 & 0x08)) ? 50 : 25;
   r_cols = (r_d031 & 0x80) ? 80 : 40;
 
-  orig_border = PEEK(0xd020) & 0x0f;
-  orig_bg = PEEK(0xd021) & 0x0f;
+  orig_border = 0;                                 /* black, as the Net-Tools menu is: no longer inherited from BASIC */
+  orig_bg = 0;
   orig_pal = (unsigned char)(PEEK(0xd030) & 0x04);
   orig_bank = (unsigned char)((PEEK(0xd070) >> 4) & 0x03);
 
