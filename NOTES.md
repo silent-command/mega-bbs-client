@@ -85,7 +85,7 @@ Kept out of the repository (`.git/info/exclude`), like the other projects' notes
 - Names typed through the serial driver must be lowercase
   (`boot_prg bbs.d81 bbs 'dialing directory'`); uppercase letters are dropped.
 - The file picker wants cursor keys; `m` then a typed name avoids them.
-- The test server on this Mac is 192.168.1.232 port 6400; it is no longer in
+- The test server on this Mac is 192.168.1.251 port 6400; it is no longer in
   the default site list (add it with A, or Quick-Dial). F7 is matrix code 03
   for tap.py; ESC is 47.
 - Sites carry no drive number since 2026-09-27; F7 toggles the working drive
