@@ -34,9 +34,7 @@ static unsigned char bm_count = 0;
 static const char defaults_txt[] =
   "Retrocampus|bbs.retrocampus.com|6510|0|0\n"
   "Particles BBS|particlesbbs.dyndns.org|6400|0|0\n"
-  "Borderline BBS|bbs.borderline.org|23|0|1\n"
   "Heatwave BBS|heatwave.ddns.net|9640|0|0\n"
-  "Black Flag BBS|blackflag.acid.org|23|1|1\n"
   "Synchronet BBS|vert.synchro.net|23|1|1\n"
   "ConChaos BBS|conchaos.synchro.net|23|1|1\n";
 

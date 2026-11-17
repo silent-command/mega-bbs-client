@@ -19,11 +19,12 @@ int main(void)
   mock_vic_regs[0xd070 & 0xffff] = 0xff;   /* and text palette bank 3 */
   m65_screen_init();
 
-  /* Startup colors are BASIC's, as the other clients start (2026-10-02) */
-  assert(m65_screen_border() == 6);
-  assert(m65_screen_bg() == 6);
-  assert(m65_screen_orig_border() == 6);
-  assert(m65_screen_orig_bg() == 6);
+  /* Startup colors are black, as the Net-Tools menu is, whatever BASIC
+   * left (2026-11-16; BASIC's blue until then) */
+  assert(m65_screen_border() == 0);
+  assert(m65_screen_bg() == 0);
+  assert(m65_screen_orig_border() == 0);
+  assert(m65_screen_orig_bg() == 0);
 
   /* A PETSCII screen keeps BASIC's palette: RAM, bank 3 */
   m65_screen_set_emul(EMUL_PETSCII);

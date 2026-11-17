@@ -115,6 +115,22 @@ int main(void)
     assert(bookmarks_get(2)->speed == SPEED_300);
   }
 
+  /* No BBSCFG: the built-in list, the same five as assets/bbscfg.txt
+   * (Borderline and Black Flag left it 2026-11-17), saved for next time. */
+  {
+    static const char *const want[] = { "Retrocampus", "Particles BBS", "Heatwave BBS",
+                                        "Synchronet BBS", "ConChaos BBS" };
+    unsigned char i;
+    remove("bbscfg.txt");
+    while (bookmarks_count() > 0) bookmarks_delete(0);
+    bookmarks_init(0);
+    assert(bookmarks_count() == 5);
+    for (i = 0; i < 5; i++) assert(strcmp(bookmarks_get(i)->name, want[i]) == 0);
+    assert(strcmp(bookmarks_get(4)->host, "conchaos.synchro.net") == 0 && bookmarks_get(4)->port == 23);
+    while (bookmarks_count() > 0) bookmarks_delete(0);
+    assert(bookmarks_load(0) && bookmarks_count() == 5);
+  }
+
   printf("Bookmarks tests passed successfully!\n");
   return 0;
 }
