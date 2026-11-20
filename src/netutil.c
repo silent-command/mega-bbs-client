@@ -1,6 +1,7 @@
 #include "mega65/memory.h"
 #include "meganet.h"
 #include "m65_boot.h"
+#include "m65_exit.h"
 #include "netutil.h"
 
 /* Three attempts of eight seconds; mega-net retries DISCOVER itself every
@@ -31,7 +32,10 @@ unsigned char net_load(const char **err)
    * exit path does: a stray event left in flight by a previous program,
    * arriving during INIT's memory clear, crashes the CPU into mega-net
    * (ssh 5.8, 5.19; PLATFORM.md trap 1). INIT brings it up. */
-  POKE(0xd6e0, 0x00);
+  /* Launched from the Net-Tools menu, the controller is running and its
+   * link up, left so by the program before: no hold, and INIT_WARM skips
+   * the reset and the PHY's 3.5 s (mega-net REQUIREMENTS.md 5.23). */
+  m65_net_hold();
   {
     unsigned char last = PEEK(0xd7fa), n = 0, wraps = 0;
     unsigned int spins = 0;
@@ -47,7 +51,7 @@ unsigned char net_load(const char **err)
   if (attempt == 3) return 0;
   lpoke(0x15FFUL, 6);
   meganet_set_restore_map(0x00, 0xE0, 0x00, 0x00);   /* the trampoline just copied carries the KERNAL map: ours again */
-  meganet_call(MEGANET_INIT, 0, 0, 0, 0);
+  meganet_call(m65_net_init_entry(), 0, 0, 0, 0);
   lpoke(0x15FFUL, 7);
   net_ready = 1;
   *err = 0;
