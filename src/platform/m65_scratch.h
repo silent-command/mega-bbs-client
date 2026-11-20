@@ -1,3 +1,5 @@
+/* Copyright 2026 Justin Cameron
+ * SPDX-License-Identifier: Apache-2.0 */
 /* Fixed-address working storage below the load address ($2001).
  *
  * Low RAM in this client (verified free on hardware by pattern writes

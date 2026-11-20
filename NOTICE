@@ -1,0 +1,9 @@
+mega-bbs-client
+Copyright 2026 Justin Cameron
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+include/mega65/ is a copy of header files from an earlier version of
+mega65-libc (https://github.com/MEGA65/mega65-libc). They are not
+covered by this project's licence: each keeps the copyright and
+licence notice it came with.

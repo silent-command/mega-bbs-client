@@ -1,3 +1,5 @@
+/* Copyright 2026 Justin Cameron
+ * SPDX-License-Identifier: Apache-2.0 */
 /* Sending a whole buffer through mega-net.
  *
  * net_send takes what fits in the stack's 3 KB send buffer and returns

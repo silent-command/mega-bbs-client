@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Justin Cameron
+# SPDX-License-Identifier: Apache-2.0
 """A telnet front for lrzsz, so the client can be tested against the same
 sz and rz that real boards use.
 

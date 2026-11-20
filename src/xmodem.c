@@ -1,3 +1,5 @@
+/* Copyright 2026 Justin Cameron
+ * SPDX-License-Identifier: Apache-2.0 */
 /* XMODEM (checksum, CRC, 1K) over the telnet stream.
  *
  * Against a real BBS the first version failed at the handshake: the

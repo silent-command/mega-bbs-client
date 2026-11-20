@@ -1,3 +1,5 @@
+/* Copyright 2026 Justin Cameron
+ * SPDX-License-Identifier: Apache-2.0 */
 /* The ZMODEM module against a scripted peer that behaves like lrzsz: it
  * streams subpackets as the client consumes them, answers headers, checks
  * every CRC it receives, refuses escapes a real receiver refuses, doubles

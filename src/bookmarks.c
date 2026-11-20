@@ -1,3 +1,5 @@
+/* Copyright 2026 Justin Cameron
+ * SPDX-License-Identifier: Apache-2.0 */
 #include <string.h>
 #include "bookmarks.h"
 #include "platform/m65_far.h"

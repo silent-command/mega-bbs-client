@@ -1,3 +1,5 @@
+/* Copyright 2026 Justin Cameron
+ * SPDX-License-Identifier: Apache-2.0 */
 /* ANSI-BBS rendering onto the text screen.
  *
  * The VIC-IV text mode has one background colour for the whole screen,

@@ -1,3 +1,5 @@
+/* Copyright 2026 Justin Cameron
+ * SPDX-License-Identifier: Apache-2.0 */
 /* The real transfer modules over a real TCP connection, against lrzsz
  * behind tools/lrzsz_bridge.py, the Python test server, or any telnet
  * board:

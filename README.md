@@ -99,3 +99,7 @@ source mega-net/tools/m65lib.sh
 put_d81 bin/BBS.D81 BBS.D81
 boot_prg bbs.d81 bbs
 ```
+
+## License
+
+Apache License 2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE).

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Justin Cameron
+# SPDX-License-Identifier: Apache-2.0
 """Build driver for mega-bbs-client: Python driver for macOS, Linux, and Windows.
 
     python3 build.py            build the client and bin/BBS.D81

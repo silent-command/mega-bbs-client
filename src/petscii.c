@@ -1,3 +1,5 @@
+/* Copyright 2026 Justin Cameron
+ * SPDX-License-Identifier: Apache-2.0 */
 #include "petscii.h"
 #include "platform/m65_screen.h"
 #include "platform/m65_font.h"

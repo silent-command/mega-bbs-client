@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Justin Cameron
+# SPDX-License-Identifier: Apache-2.0
 """Drives the test server from a second Python process, so the server's
 own ZMODEM and XMODEM can be checked without a client.
 

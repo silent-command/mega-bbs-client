@@ -1,3 +1,5 @@
+/* Copyright 2026 Justin Cameron
+ * SPDX-License-Identifier: Apache-2.0 */
 /* The XMODEM module against a scripted peer: a sender that answers 'C'
  * or NAK with blocks (128 or 1K, CRC or checksum), can corrupt a block,
  * drop a stray EOT into the stream, cancel or stay silent; and a receiver

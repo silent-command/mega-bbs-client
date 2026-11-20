@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Justin Cameron
+# SPDX-License-Identifier: Apache-2.0
 """A small telnet BBS for testing the MEGA65 BBS client's transfers.
 
     python3 tools/bbs_test_server.py [--port 6400] [--mode petscii|ansi]

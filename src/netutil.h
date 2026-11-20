@@ -1,3 +1,5 @@
+/* Copyright 2026 Justin Cameron
+ * SPDX-License-Identifier: Apache-2.0 */
 /* mega-net from the client's side: bringing it up, names, one TCP
  * connection. Every wait is bounded on $D7FA. */
 #ifndef NETUTIL_H

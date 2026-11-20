@@ -1,3 +1,5 @@
+/* Copyright 2026 Justin Cameron
+ * SPDX-License-Identifier: Apache-2.0 */
 /* Tables kept in bank 1, reached through the DMA helpers.
  *
  * Bank 1 is outside the CPU's 64K map, so a table there cannot be

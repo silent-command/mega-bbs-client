@@ -1,3 +1,5 @@
+/* Copyright 2026 Justin Cameron
+ * SPDX-License-Identifier: Apache-2.0 */
 /* ZMODEM over the telnet stream: receive (started by the sender's ZRQINIT
  * or from the transfer menu) and send.
  *
